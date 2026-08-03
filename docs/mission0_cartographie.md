@@ -70,7 +70,7 @@ Tout *customer_id* référencé dans `ref_site` ou `ref_contract` figure ici.
 
 **Maille** :
 
-Une ligne par client. Pas de *client \times date*, pas de *client \times site* ni de *client \times contrat*.
+Une ligne par client. Pas de *client × date*, pas de *client × site* ni de *client × contrat*.
 
 **Clés candidates** (colonnes seules ou combinées qui devraient identifier une ligne) :
 
@@ -85,13 +85,54 @@ Prédiction : 0 doublon sur customer_name. Si j'en trouve, deux lectures possibl
 
 On s'attend à 220 lignes exactement. Le §1 annonce 220 clients sans approximation, contrairement aux 1 400 sites. Tolérance 0.
 
-**Résultat** :
+**Résultat et écart** :
 
-> à remplir après exécution
+Tests exécutés dans `notebooks/mission0_cartographie.ipynb`, section `ref_customer`.
 
-**Écart entre prédiction et résultat** :
+| Promesse | Prédiction | Résultat | Écart |
+|---|---|---|---|
+| Nombre de lignes | 220, tolérance 0 | 220 | **0** |
+| `customer_id` unique | unique | 220 lignes / 220 distincts | **0** |
+| `customer_name` sans doublon | 0 | 0, à 5 niveaux de normalisation | **0** |
+| Exhaustivité : tout `customer_id` de `ref_site` existe ici | 0 orphelin | 0 | **0** |
+| Exhaustivité : tout `customer_id` de `ref_contract` existe ici | 0 orphelin | 0 | **0** |
+| Périmètre : tout client a au moins un site | 0 | 0 client sans site | **0** |
+| Périmètre : tout client a signé un contrat | 0 | **74 clients sans aucun contrat** | **74 lignes, 33,6 %** |
 
-> à remplir
+Six promesses sur sept sont confirmées. La septième est falsifiée sur un tiers de la table :
+la phrase de Niveau 0 affirme *« c'est l'entité juridique qui signe le contrat »*, or 74 clients
+sur 220 n'ont aucune ligne dans `ref_contract`. Aucun verdict à ce stade — anomalie, bruit ou
+réalité métier mal comprise reste à trancher, et le sujet exige d'argumenter les deux positions
+avant de conclure.
+
+Dissymétrie à retenir : **tout client a au moins un site, mais un tiers n'a aucun contrat.**
+Des sites rattachés à aucun engagement contractuel tracé, c'est la matière de la troisième
+question de la Mission 0.
+
+Reste à faire avant de trancher :
+
+- répartition `commodity` des sites des 74 contre les 146 autres, et répartition `commodity` de `ref_contract` ;
+- mêmes comparaisons sur `segment`, `sector`, `region` — un écart concentré sur une modalité est structurel, un écart uniforme évoque une perte de données ;
+- population voisine non testée : clients dont **tous** les contrats sont expirés au 24/07/2026 (`ref_contract.end_date`) ;
+- quantification en MWh via `ref_site.contracted_capacity_kw` cumulée sur les sites de ces 74 clients.
+
+**Sur `customer_name` comme clé candidate** : unique, non nulle, robuste aux 5 normalisations testées.
+L'égalité `count(*) = count(DISTINCT customer_name) = 220` établit à la fois l'unicité et l'absence
+de nul — 219 lignes ne peuvent pas produire 220 valeurs distinctes. Réserve : l'échelle de
+normalisation n'a fusionné aucune ligne à aucun échelon. Elle n'est donc pas *validée*, elle n'a
+simplement rien eu à normaliser. Ce qui est établi : « aucun doublon de nom n'est détectable par
+les normalisations testées ». Ce qui ne l'est pas : « la fonction de normalisation est correcte ».
+
+**Contrôle vert sur données fausses — à conserver pour la question 5 des restitutions.**
+Le cinquième échelon de normalisation a d'abord été écrit
+`regexp_replace(strip_accents(upper(trim(customer_name))), '[^A-Z0-9]', 'g')` — trois arguments
+au lieu de quatre. Le `'g'` était lu comme le *texte de remplacement*, pas comme l'option globale :
+la requête remplaçait le premier caractère non alphanumérique par la lettre `g`
+(`CARREFOUR S.A.S.` → `CARREFOURgS.A.S.`). Aucune erreur levée, résultat `220` parfaitement
+plausible et cohérent avec les quatre autres colonnes. Détecté en relisant le code, pas le résultat.
+
+Contrôle à ajouter au harnais : **un agrégat cache sa matière première**. Toute colonne calculée
+s'inspecte en clair (`SELECT col, col_transformee LIMIT 10`) avant d'être agrégée.
 
 ## Niveau 1 - colonnes
 
