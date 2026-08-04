@@ -141,8 +141,69 @@ s'inspecte en clair (`SELECT col, col_transformee LIMIT 10`) avant d'être agré
 
 Ordre de traitement : clés et colonnes de jointure, puis mesures, puis descriptifs.
 
-| Colonne | Promesse du nom (une phrase) | Classe de promesse | Prédiction | Résultat | Écart | Verdict |
-|---------|------------------------------|--------------------|------------|----------|-------|---------|
+| Colonne | Promesse du nom | Classe | Prédiction | Résultat | Écart | Verdict |
+|---|---|---|---|---|---|---|
+| `customer_id` | Identifie un client de façon unique et stable, et sert de clé de jointure vers `ref_site` et `ref_contract`. | unicité, complétude | unique et non nul (traité au Niveau 0) | 220 lignes / 220 distincts, 0 nul | 0 | conforme |
+| `customer_name` | Porte la dénomination sociale de l'entité juridique signataire. | unicité, convention de saisie | 0 doublon, y compris après normalisation | 220 distincts aux 5 échelons | 0 | conforme, sous réserve que l'échelle de normalisation n'a rien eu à normaliser |
+| `sector` | Indique le secteur d'activité économique du client. | domaine de valeurs, complétude | *non écrite avant exécution* | 7 modalités, 0 nul. Sante 39, Tertiaire 35, Distribution 33, Industrie 33, Collectivite 27, Transport 27, Agroalimentaire 26. Modalité la plus fréquente : 17,7 %. | non mesurable | distribution plate, aucun secteur dominant |
+| `segment` | Indique le segment commercial auquel le client est rattaché, indépendamment de son secteur. | domaine de valeurs, complétude | *non écrite avant exécution* | 4 modalités, 0 nul. PME 74, ETI 66, PUBLIC 43, GRAND_COMPTE 37. | non mesurable | voir observation 2 |
+| `credit_rating` | Porte la notation de crédit de la contrepartie, sur une échelle ordinale et non numérique. | domaine de valeurs, convention d'échelle, complétude | *non écrite avant exécution* | 6 modalités, 0 nul au sens SQL. BBB 64, BB 54, A 33, **NR 31**, B 27, AA 11. | non mesurable | voir observation 1 |
+
+Ordre retenu : `customer_id` et `customer_name` d'abord, ce sont la clé de jointure et la clé
+naturelle. `ref_customer` ne contient aucune mesure, le reste est descriptif.
+
+**Réserve** : les trois lignes descriptives ont été mesurées sans prédiction écrite préalable. Les
+résultats sont exacts, l'écart n'est pas mesurable, et rien n'y est opposable au titre du protocole.
+Deuxième occurrence après l'exploration initiale du 3 août.
+
+### Observation 1 - l'absence de notation est encodée comme une valeur
+
+`credit_rating` ne contient **aucun nul au sens SQL**, mais 31 clients sur 220, soit **14,1 %**, portent
+la modalité `NR`, c'est-à-dire *not rated*. Un contrôle de complétude écrit `isna().sum()` ou
+`count(*) - count(credit_rating)` renverrait donc 0 et passerait au vert, alors qu'un client sur sept
+n'a pas de notation.
+
+Conséquence directe : toute statistique conditionnée à la notation doit exclure `NR` explicitement,
+et le taux de couverture de la notation doit être publié à côté de la statistique elle-même.
+
+Deuxième contrôle vert sur données fausses du projet, à conserver pour la question 5 des restitutions.
+Mécanisme différent du premier : ici ce n'est pas la requête qui est fautive, c'est la convention
+d'encodage de la source qui rend le contrôle inopérant.
+
+### Observation 2 - l'échelle de notation et le profil de risque
+
+L'échelle observée est `AA`, `A`, `BBB`, `BB`, `B`, plus `NR`. Elle est **contiguë, sans trou**, ce qui
+est cohérent avec une échelle ordinale de type agence de notation. Absentes : `AAA` vers le haut,
+`CCC` et en dessous vers le bas.
+
+Répartition par catégorie de risque, hors `NR` :
+
+| Catégorie | Notations | Clients | Part du portefeuille |
+|---|---|---|---|
+| Investment grade | `AA`, `A`, `BBB` | 108 | 49,1 % |
+| Speculative grade | `BB`, `B` | 81 | **36,8 %** |
+| Non noté | `NR` | 31 | 14,1 % |
+
+Plus d'un tiers du portefeuille est en catégorie spéculative. Sur des contrats pluriannuels couverts
+par des achats de gros, un défaut client laisse la couverture ouverte et transforme un risque de crédit
+en risque de marché. Ce chiffre est à rapprocher plus tard des volumes concernés, pas seulement du
+nombre de clients : 36,8 % des clients ne signifie pas 36,8 % du volume.
+
+### Observation 3 - `segment` et `sector` sont indépendants, mais `PUBLIC` interroge
+
+Le tableau croisé totalise 220, aucune ligne n'est écartée. La répartition est proche de
+l'indépendance, ce qui confirme l'hypothèse de Niveau 0 : les deux colonnes décrivent bien des
+dimensions différentes.
+
+Une incohérence sémantique reste à trancher. Sur les 43 clients de segment `PUBLIC`, seuls **6** sont
+du secteur `Collectivite`, contre 11 en `Sante`, 9 en `Industrie`, 9 en `Tertiaire` et 4 en
+`Agroalimentaire`. Symétriquement, sur les 27 clients de secteur `Collectivite`, **21 sont classés
+`PME`, `ETI` ou `GRAND_COMPTE`**, segments qui désignent des tailles d'entreprise privée.
+
+Deux lectures, à départager plus tard : soit `PUBLIC` désigne un mode de contractualisation, un marché
+public par exemple, et peut alors coexister avec n'importe quel secteur ; soit l'affectation des
+modalités est incohérente et relève d'une anomalie de référentiel. Ne pas trancher sans avoir vu le
+comportement de `ref_contract`, où `pricing_type` pourrait porter la même information.
 
 Classes de promesse : unicité, domaine de valeurs, complétude, ordre de grandeur, convention.
 Verdicts possibles : anomalie, bruit, réalité métier mal comprise. Un verdict s'accompagne de
@@ -182,7 +243,80 @@ Pour *monitored* : Prédiction : environ 500 lignes à monitored = 1. La Mission
 
 **Résultat et écart** :
 
-> à remplir après exécution
+Tests exécutés dans `notebooks/mission0_cartographie.ipynb`, section `ref_site`.
+
+| Mesure | Prédiction | Résultat | Écart |
+|---|---|---|---|
+| `count(*)` | 1 400, intervalle [1 350 ; 1 450] | 1 400 | **0** |
+| `count(distinct site_id)` | 1 250 à 1 350, **strictement inférieur** au nombre de lignes | **1 400** | +50 à +150 selon la borne, et surtout l'inégalité stricte est fausse |
+| `count(distinct (site_id, commodity))` | égal au nombre de lignes | 1 400 | 0 |
+| `count(distinct (site_id, commodity, dso))` | égal au précédent | 1 400 | 0 |
+| `count(distinct customer_id)` | 220 | 220 | **0** |
+| lignes à `monitored = 1` | environ 500 | 500 | **0** |
+
+`monitored` a pour domaine `{0, 1}`, sans nul : 500 lignes à 1 et 900 à 0.
+
+### Verdict : la définition de Niveau 0 est falsifiée
+
+`count(distinct site_id) = count(*) = 1 400`. **`site_id` est unique.** La définition retenue supposait
+qu'un lieu bi-énergie occupe deux lignes de même `site_id` ; elle est contredite par les données.
+La lecture concurrente, écartée au moment de la prédiction, est la bonne : le site est le point de
+livraison, pas le lieu physique.
+
+Conséquences : la maille annoncée `site × commodity` est fausse, et `(site_id, commodity)` n'est pas
+une clé candidate mais une **surclé**, puisqu'elle n'est pas minimale.
+
+### Deux tests ne pouvaient pas échouer
+
+`count(distinct (site_id, commodity))` et `count(distinct (site_id, commodity, dso))` valent 1 400 par
+construction : dès lors que `site_id` est unique, aucune combinaison le contenant ne peut donner une
+autre valeur. Ces deux contrôles sont passés au vert sans avoir la possibilité de rougir.
+
+Il reste donc non établi que `dso` soit fonctionnellement déterminé par la géographie et la commodité.
+Le tester exige une clé qui ne contienne pas `site_id`, par exemple `(region, commodity)`. Reporté au
+Niveau 1.
+
+Troisième occurrence d'un contrôle structurellement incapable d'échouer, après l'échelle de
+normalisation de `ref_customer` et le comptage de `credit_rating`. Le point commun : dans les trois
+cas le résultat était correct et l'information nulle.
+
+### La tolérance n'a jamais servi
+
+Le résultat est 1 400 pile, alors que l'énoncé annonçait « environ ». L'intervalle [1 350 ; 1 450],
+construit sur l'arrondi à la centaine, n'a été mis à l'épreuve à aucun moment. La méthode de
+construction de la tolérance reste défendable, mais elle n'est pas validée par ce test.
+
+## Niveau 0 bis - cadrage révisé
+
+**Ceci n'est pas une prédiction.** C'est une reformulation établie après mesure, et elle tombe juste
+par construction sur le point qui l'a produite. Elle n'a pas la même valeur probante que le bloc
+précédent.
+
+**Que représente une ligne** :
+
+Une ligne représente l'état courant d'un point de livraison d'énergie du portefeuille B2B France gaz et
+électricité, rattaché à une seule commodité. Un point de livraison appartient à un seul client,
+l'entité juridique signataire. Le DSO est déterminé par la géographie et par la commodité. En l'absence
+de toute colonne de date, la table est un état courant : un changement de puissance souscrite ou une
+résiliation écrase la valeur précédente, aucun historique n'est conservé.
+
+**Maille** : une ligne par `site_id`. Pas de `site × commodity`, pas de `site × client`, pas de
+`site × date`.
+
+**Clés candidates** : `site_id` seul, minimale. `(site_id, commodity)` est unique mais non minimale,
+donc surclé et non clé candidate.
+
+### Ce que la version révisée affirme sans pouvoir le prouver
+
+La formulation « un lieu desservi en gaz et en électricité compte deux points de livraison distincts »
+est **invérifiable avec cette table**. Aucune colonne n'identifie le lieu physique : `site_id` identifie
+le point de livraison, pas l'adresse. Rien ne permet donc de dire si deux points de livraison sont au
+même endroit.
+
+C'est une limite structurelle du référentiel, du même ordre que l'absence d'historique. Un raisonnement
+par site géographique, par exemple pour mesurer une exposition par implantation industrielle, n'est pas
+possible à partir de `ref_site` seule. Un rapprochement approximatif serait envisageable via
+`customer_id`, `region` et `dso`, jamais une preuve.
 
 ## Niveau 1 - colonnes
 
