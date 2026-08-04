@@ -320,8 +320,77 @@ possible à partir de `ref_site` seule. Un rapprochement approximatif serait env
 
 ## Niveau 1 - colonnes
 
-| Colonne | Promesse du nom (une phrase) | Classe de promesse | Prédiction | Résultat | Écart | Verdict |
-|---------|------------------------------|--------------------|------------|----------|-------|---------|
+| Colonne | Promesse du nom | Classe | Prédiction | Résultat | Écart | Verdict |
+|---|---|---|---|---|---|---|
+| `site_id` | Identifie un point de livraison de façon unique et stable. | unicité, complétude | unique et non nul (traité au Niveau 0) | 1 400 lignes / 1 400 distincts | 0 | conforme |
+| `customer_id` | Rattache le point de livraison au client titulaire, et sert de clé de jointure vers `ref_customer`. | complétude, intégrité référentielle | à remplir | 220 valeurs distinctes, 0 orphelin (traité au Niveau 0 de `ref_customer`) | | |
+| `contracted_capacity_kw` | Donne la puissance souscrite au raccordement, en kilowatts. | ordre de grandeur, convention d'unité, complétude | à remplir | | | |
+| `commodity` | Indique l'énergie livrée sur ce point de livraison. | domaine de valeurs, complétude | à remplir | | | |
+| `monitored` | Indique si le site est suivi en granularité horaire. | domaine de valeurs, complétude | environ 500 à 1 (traité au Niveau 0) | domaine `{0, 1}`, 0 nul, 500 à 1 et 900 à 0 | 0 | conforme |
+| `profile_type` | Donne le profil de consommation type servant à estimer la courbe de charge d'un site non télérelevé. | domaine de valeurs, complétude | à remplir | | | |
+| `region` | Localise le point de livraison à la maille région administrative. | domaine de valeurs, complétude | à remplir | | | |
+| `dso` | Nomme le gestionnaire de réseau de distribution qui achemine l'énergie jusqu'au compteur. | domaine de valeurs, dépendance fonctionnelle, cohérence physique | voir ci-dessous | voir ci-dessous | | |
+
+### `dso` : dépendance fonctionnelle et cohérence physique
+
+**Promesse.** Un point de livraison est raccordé au réseau qui dessert son adresse. Le gestionnaire de
+réseau n'est pas choisi par le client ni par le fournisseur : il est imposé par la géographie et par
+l'énergie. `dso` devrait donc être **fonctionnellement déterminé par `(region, commodity)`**, et non
+constituer une dimension libre.
+
+#### Test 1, réalisé : `dso` croisé avec `region`
+
+`pd.crosstab(df_ref_site.dso, df_ref_site.region)`
+
+Les cinq DSO apparaissent dans les **dix** régions, avec des effectifs comparables partout, compris
+entre 15 et 38.
+
+| DSO | Sites | Part |
+|---|---|---|
+| GEREDIS | 297 | 21,2 % |
+| SRD | 289 | 20,6 % |
+| GRDF | 287 | 20,5 % |
+| ENEDIS | 268 | 19,1 % |
+| RESEAU_LOCAL | 259 | 18,5 % |
+
+**Verdict : la promesse est contredite.** `dso` n'est pas déterminé par la région ; les cinq valeurs
+se répartissent uniformément sur tout le territoire.
+
+Deux invraisemblances métier s'ajoutent au constat statistique :
+
+- Enedis exploite environ 95 % du réseau de distribution d'électricité français et GRDF environ 95 %
+  de celui du gaz. Une répartition à environ 20 % chacun sur cinq opérateurs est incompatible avec la
+  structure réelle du marché français.
+- GEREDIS et SRD sont des entreprises locales de distribution dont le territoire est **départemental**,
+  respectivement les Deux-Sèvres et la Vienne, toutes deux en Nouvelle-Aquitaine. Les voir desservir
+  37 sites en Bretagne ou 36 dans le Grand Est est physiquement impossible.
+
+La répartition quasi uniforme sur cinq opérateurs et dix régions est la signature d'une affectation
+aléatoire.
+
+#### Test 2, à exécuter : `dso` croisé avec `commodity`
+
+Le test 1 établit une invraisemblance. Le test 2 vise une **contradiction dure**, qui ne dépend
+d'aucune connaissance de parts de marché.
+
+Enedis exploite un réseau électrique, GRDF un réseau gaz. Ce sont deux infrastructures physiques
+distinctes, des câbles d'un côté et des canalisations de l'autre. Un point de livraison de gaz
+raccordé à Enedis n'est pas improbable : il est impossible.
+
+**Prédiction, écrite avant exécution** : `pd.crosstab(df_ref_site.dso, df_ref_site.commodity)` doit
+donner ENEDIS à 100 % sur `POWER` et GRDF à 100 % sur `GAS`. Nombre de lignes en contradiction
+attendu : **0**. Les trois autres valeurs, GEREDIS, SRD et RESEAU_LOCAL, ne sont pas contraintes par
+ce raisonnement : GEREDIS et SRD distribuent de l'électricité dans la réalité, mais leur affectation
+étant déjà démontrée aléatoire au test 1, aucune prédiction n'est formulée à leur sujet.
+
+Si des lignes contredisent la prédiction, chiffrer l'écart en nombre de lignes puis en puissance
+souscrite cumulée (`contracted_capacity_kw`), et rapprocher cette famille des quatre familles
+d'anomalies de référentiel annoncées par le sujet.
+
+*Note de provenance : la connaissance métier mobilisée ici, parts de marché d'Enedis et de GRDF,
+périmètre départemental de GEREDIS et de SRD, séparation physique des réseaux gaz et électricité,
+n'est pas déduite des données. Elle vient de l'extérieur du jeu de données et c'est elle qui rend la
+prédiction falsifiable.*
 
 ---
 
