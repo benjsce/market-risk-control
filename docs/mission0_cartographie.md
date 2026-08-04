@@ -152,7 +152,42 @@ l'hypothèse retenue et de l'alternative écartée.
 
 # 2. `ref_site`
 
-*à ouvrir une fois `ref_customer` clos*
+Colonnes : `site_id`, `customer_id`, `commodity`, `region`, `dso`, `contracted_capacity_kw`,
+`profile_type`, `monitored`.
+
+## Niveau 0 - cadrage
+
+**Que représente une ligne** (une phrase, nom au singulier) :
+
+Une ligne représente l'état courant de la desserte d'un lieu physique en une commodité, pour un client du portefeuille B2B France gaz et électricité. Un lieu desservi en gaz et en électricité occupe deux lignes portant le même site_id, chacune avec sa commodité et son gestionnaire de réseau. Le DSO est déterminé par la géographie du lieu et par la commodité. Un site appartient à un seul client, l'entité juridique signataire. En l'absence de toute colonne de date, la table est un état courant : un changement de puissance souscrite ou une résiliation écrase la valeur précédente, aucun historique n'est conservé.
+
+**Maille** :
+
+Une ligne par *site x commodité*. Pas de *site x client* : "un site appartient à un seul client". Pas de *site x date* 
+
+**Clés candidates** (colonnes seules ou combinées qui devraient identifier une ligne) :
+
+*site_id x commodity*. *site_id* est écarté en raison qu'un même site peut recevoir plusieurs commodités.
+
+**Nombre de lignes prédit**, et le raisonnement qui y mène :
+
+Prédiction : 1 400 lignes, intervalle [1 350 ; 1 450], soit ±3,6 %. Lecture retenue : les « environ 1 400 sites » du README comptent des lignes de *ref_site*.
+
+Prédiction dérivée, celle qui teste la définition retenue : `count(distinct site_id)` **strictement
+inférieur** au nombre de lignes, de l'ordre de 1 250 à 1 350 si 5 à 10 % des lieux sont desservis en
+gaz et en électricité. Si `count(distinct site_id)` égale `count(*)`, la définition de Niveau 0 est
+fausse et doit être remplacée par « le site est le point de livraison ».
+
+Pour *monitored* : Prédiction : environ 500 lignes à monitored = 1. La Mission 4 annonce 5,8 millions de lignes de prévisions horaires sur 500 sites. Contrôle de cohérence : 500 × 8 760 = 4 380 000, soit 1,32 fois moins que 5,8 millions ; l'écart s'explique par la coexistence de plusieurs versions de prévision, qui multiplie les lignes sans multiplier les sites.
+
+**Résultat et écart** :
+
+> à remplir après exécution
+
+## Niveau 1 - colonnes
+
+| Colonne | Promesse du nom (une phrase) | Classe de promesse | Prédiction | Résultat | Écart | Verdict |
+|---------|------------------------------|--------------------|------------|----------|-------|---------|
 
 ---
 
