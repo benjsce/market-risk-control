@@ -387,6 +387,65 @@ Si des lignes contredisent la prédiction, chiffrer l'écart en nombre de lignes
 souscrite cumulée (`contracted_capacity_kw`), et rapprocher cette famille des quatre familles
 d'anomalies de référentiel annoncées par le sujet.
 
+#### Test 2, résultat : prédiction falsifiée
+
+`pd.crosstab(df_ref_site.dso, df_ref_site.commodity)`
+
+| DSO | GAS | POWER | Part gaz |
+|---|---|---|---|
+| ENEDIS | **102** | 166 | 38,1 % |
+| GEREDIS | 109 | 188 | 36,7 % |
+| GRDF | 122 | **165** | 42,5 % |
+| RESEAU_LOCAL | 93 | 166 | 35,9 % |
+| SRD | 95 | 194 | 32,9 % |
+| **ensemble** | **521** | **879** | **37,2 %** |
+
+| | Prédiction | Résultat | Écart |
+|---|---|---|---|
+| Lignes en contradiction physique | 0 | **267** | **+267** |
+
+**Chiffrage.** 267 lignes sur 1 400, soit **19,1 %** du référentiel, représentant **1 125 523 kW** de
+puissance souscrite sur 5 242 077 kW au total, soit **21,5 %** du portefeuille en puissance. Détail :
+102 sites gaz raccordés à Enedis, 165 sites électriques raccordés à GRDF.
+
+Les deux parts sont proches, 19,1 % en lignes contre 21,5 % en puissance. L'anomalie ne se concentre
+donc **ni sur les gros sites ni sur les petits**, elle frappe uniformément. Une erreur de saisie
+humaine se concentrerait quelque part ; une affectation aléatoire non.
+
+#### Verdict : `dso` est aléatoire, pas erroné à 19 %
+
+Chacun des cinq opérateurs présente la même proportion de gaz que le portefeuille global, entre 32,9 %
+et 42,5 % contre 37,2 % d'ensemble. `dso` est donc **indépendant de `commodity`**, comme le test 1
+l'avait déjà montré indépendant de `region`.
+
+Une colonne indépendante de tout ce qui devrait la déterminer ne porte aucune information. La lecture
+correcte n'est pas « 19,1 % des valeurs sont fausses » mais **« la colonne est inexploitable »**.
+
+GRDF, gestionnaire du réseau **gaz**, est d'ailleurs majoritairement affecté à des sites **électriques**,
+165 contre 122.
+
+**Le 267 est un plancher, pas une mesure.** C'est le nombre de lignes réfutables avec une connaissance
+externe portant sur deux opérateurs seulement. Les 1 133 autres ne sont pas validées : elles sont
+seulement non réfutables par ce test. GEREDIS desservant la Bretagne est tout aussi impossible, mais
+la contradiction gaz/électricité ne permet pas de le démontrer.
+
+Cette distinction commande la recommandation :
+
+| Lecture | Recommandation induite |
+|---|---|
+| « 19,1 % de la colonne est erronée » | corriger 267 lignes |
+| « la colonne est aléatoire » | n'utiliser `dso` dans aucun contrôle tant que la source n'est pas reconstruite |
+
+La seconde est celle que les données soutiennent.
+
+**Classement** : anomalie de référentiel, retenue comme l'une des quatre familles annoncées par le
+sujet. Alternative écartée : bruit statistique. Elle ne tient pas, une affectation bruitée resterait
+corrélée à la géographie et à l'énergie, ce qui n'est le cas d'aucun des deux tests.
+
+**Portée pour la suite** : toute jointure, tout regroupement ou tout filtre s'appuyant sur `dso` produira
+un résultat sans signification. `region` n'est pas disqualifiée pour autant, sa cohérence propre reste
+à tester séparément.
+
 *Note de provenance : la connaissance métier mobilisée ici, parts de marché d'Enedis et de GRDF,
 périmètre départemental de GEREDIS et de SRD, séparation physique des réseaux gaz et électricité,
 n'est pas déduite des données. Elle vient de l'extérieur du jeu de données et c'est elle qui rend la
