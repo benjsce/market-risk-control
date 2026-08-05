@@ -359,11 +359,108 @@ sans prédiction préalable, et ne sont pas opposables. La médiane, le minimum 
 été mesurés et restent prédictibles. L'écart entre médiane et moyenne renseignera sur l'asymétrie de
 la distribution.
 
-**Test prévu :**
+**Résultats :**
 
-```python
-df_ref_site.groupby("monitored")["contracted_capacity_kw"].agg(["count", "median", "mean", "sum"])
-```
+`describe()` : count 1 400, moyenne 3 744,34, écart-type 5 057,85, min 61, Q1 1 157,50,
+médiane 2 258, Q3 4 538,75, max 89 750.
+
+| # | Prédiction | Résultat | Écart | Verdict |
+|---|---|---|---|---|
+| 1 | 0 nul | 0 | **0** | confirmée |
+| 2 | aucune valeur ≤ 0 | 0, minimum à 61 kW | **0** | confirmée |
+| 3 | entre 36 kW et 50 000 kW | min 61 kW, **max 89 750 kW** | borne basse tenue ; borne haute dépassée de **79,5 %** | **falsifiée** |
+| 4 | `monitored = 1` détient 90 % de la puissance | **36,6 %** | **-53,4 points**, à 0,9 point du point neutre de 35,7 % | **falsifiée** |
+
+**Distribution.** Moyenne 3 744 kW contre médiane 2 258 kW : la moyenne dépasse le troisième
+quartile de peu et se situe bien au-dessus de la médiane, donc plus de la moitié des sites sont sous
+la moyenne. Distribution fortement asymétrique vers le haut, tirée par une minorité de gros sites.
+L'écart-type, 5 058 kW, dépasse la moyenne, ce qui confirme la dispersion.
+
+**Écart 3, chiffré.** Deux sites dépassent 50 000 kW : 89 750 et 55 238. Soit **2 lignes sur 1 400**,
+0,14 % du référentiel, et **2,77 %** de la puissance souscrite totale. Le classement des vingt plus
+grandes valeurs ne montre **aucun palier** : après 55 238 la série retombe à 38 433 puis décroît
+régulièrement. Ce ne sont donc pas les membres d'une famille mais deux valeurs isolées. Erreur de
+saisie ou sites réellement très gros mal rattachés au réseau de distribution : indécidable sur deux
+points. **Non retenu comme famille d'anomalies.**
+
+Leçon de méthode à conserver : les prédictions 3 et 4 sont toutes deux falsifiées, et elles ne pèsent
+pas du tout la même chose. La troisième vaut 2 lignes et 2,77 % de la puissance, la quatrième invalide
+une colonne entière. Sans chiffrage, elles auraient eu le même poids dans un rapport. **Une prédiction
+falsifiée n'est pas automatiquement une trouvaille.**
+
+### `monitored` et `profile_type` : deux colonnes sans déterminant
+
+L'écart 4 ci-dessus ouvrait deux lectures : soit `monitored` est aléatoire, soit il encode une réalité
+autre que la taille du raccordement. Deux croisements supplémentaires tranchent.
+
+`pd.crosstab(df_ref_site.monitored, df_ref_site.commodity)` et
+`pd.crosstab(df_ref_site.monitored, df_ref_site.profile_type)`
+
+| Croisement | `monitored = 0` | `monitored = 1` | Ensemble |
+|---|---|---|---|
+| Part de gaz | 37,4 % | 36,8 % | 37,2 % |
+| PROFILE_BASE | 24,4 % | 25,2 % | 24,7 % |
+| PROFILE_FLAT | 26,0 % | 26,0 % | 26,0 % |
+| PROFILE_PEAK | 25,7 % | 24,4 % | 25,2 % |
+| PROFILE_SEASONAL | 23,9 % | 24,4 % | 24,1 % |
+| Médiane de puissance | 2 190,5 kW | 2 338,5 kW | 2 258 kW |
+
+`monitored` est indépendant de `commodity`, de `profile_type` et de `contracted_capacity_kw`. Le
+rapport des médianes vaut 1,07, celui des moyennes 1,04 : les sites télérelevés sont indistinguables
+des autres. La lecture de repli tombe : une colonne qui encoderait une réalité autre serait corrélée
+à quelque chose.
+
+**Promesse sur `profile_type`.** Les profils de consommation gaz et électricité sont des objets
+distincts. `profile_type` devrait donc dépendre de `commodity`, avec au moins une modalité concentrée
+à plus de 90 % sur une seule énergie. Point neutre : 37,2 % de gaz partout.
+
+`pd.crosstab(df_ref_site.profile_type, df_ref_site.commodity, normalize="index")`
+
+| Profil | Part de gaz |
+|---|---|
+| PROFILE_BASE | 37,3 % |
+| PROFILE_FLAT | 38,2 % |
+| PROFILE_PEAK | 37,1 % |
+| PROFILE_SEASONAL | 36,2 % |
+| **portefeuille** | **37,2 %** |
+
+Prédiction falsifiée. Les quatre profils collent au taux global à un point près. `profile_type` est
+indépendant de `commodity`.
+
+Observation complémentaire : un profil type sert à **estimer** la consommation d'un site qu'on ne
+mesure pas. Les 500 sites télérelevés en portent pourtant un, dans les mêmes proportions que les
+autres. Cohérent avec une affectation aléatoire, incohérent avec un usage métier.
+
+### Famille d'anomalies n° 1 : les attributs descriptifs de `ref_site` sont affectés au hasard
+
+Trois colonnes, un seul mécanisme.
+
+| Colonne | Ce qui devrait la déterminer | Résultat |
+|---|---|---|
+| `dso` | `region` et `commodity` | indépendante des deux |
+| `monitored` | `contracted_capacity_kw` | indépendante, plus indépendante de `commodity` et `profile_type` |
+| `profile_type` | `commodity` | indépendante |
+
+**Comptée comme une seule famille** parmi les quatre annoncées par le sujet. Une famille d'anomalies
+se définit par sa cause et par son remède, non par le nombre de colonnes qu'elle touche : la cause est
+unique, une affectation aléatoire à la génération du référentiel, et le remède est unique, reconstruire
+la source. Trois familles restent donc à chercher ailleurs.
+
+*Alternative écartée* : compter trois familles, une par colonne, au motif que les conséquences métier
+diffèrent, `dso` cassant la logique d'acheminement, `monitored` le périmètre de suivi horaire et
+`profile_type` l'estimation de courbe de charge. Écartée parce qu'elle conduirait à annoncer trois
+familles sur quatre trouvées, ce que la démonstration ne soutient pas.
+
+**Chiffrage de la famille.** Seul `dso` est réfutable ligne à ligne, par contradiction physique :
+267 lignes, 19,1 % du référentiel, 1 125 523 kW soit 21,5 % de la puissance. `monitored` et
+`profile_type` ne se chiffrent pas de la même manière : aucune de leurs valeurs n'est individuellement
+impossible, c'est leur distribution qui est vide de sens. Pour ces deux colonnes, l'impact n'est pas un
+nombre de lignes mais l'inexploitabilité complète, soit 1 400 lignes sur 1 400.
+
+**Portée pour la suite.** Aucun contrôle, aucune jointure et aucun regroupement ne doit s'appuyer sur
+`dso`, `monitored` ou `profile_type`. Conséquence directe sur la Mission 4 : `monitored` ne permet pas
+d'identifier les sites suivis en horaire, il faudra dériver ce périmètre de `volumes_hourly` elle-même.
+`contracted_capacity_kw` reste exploitable et conserve son rôle de grandeur de référence par site.
 
 ### `dso` : dépendance fonctionnelle et cohérence physique
 
@@ -472,9 +569,11 @@ Cette distinction commande la recommandation :
 
 La seconde est celle que les données soutiennent.
 
-**Classement** : anomalie de référentiel, retenue comme l'une des quatre familles annoncées par le
-sujet. Alternative écartée : bruit statistique. Elle ne tient pas, une affectation bruitée resterait
-corrélée à la géographie et à l'énergie, ce qui n'est le cas d'aucun des deux tests.
+**Classement** : anomalie de référentiel. `dso` n'est pas une famille à lui seul : il est le volet
+réfutable ligne à ligne d'une famille plus large, décrite plus bas sous « Famille d'anomalies n° 1 »,
+qui couvre également `monitored` et `profile_type`. Alternative écartée : bruit statistique. Elle ne
+tient pas, une affectation bruitée resterait corrélée à la géographie et à l'énergie, ce qui n'est le
+cas d'aucun des deux tests.
 
 **Portée pour la suite** : toute jointure, tout regroupement ou tout filtre s'appuyant sur `dso` produira
 un résultat sans signification. `region` n'est pas disqualifiée pour autant, sa cohérence propre reste
