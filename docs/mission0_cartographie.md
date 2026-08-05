@@ -324,12 +324,46 @@ possible à partir de `ref_site` seule. Un rapprochement approximatif serait env
 |---|---|---|---|---|---|---|
 | `site_id` | Identifie un point de livraison de façon unique et stable. | unicité, complétude | unique et non nul (traité au Niveau 0) | 1 400 lignes / 1 400 distincts | 0 | conforme |
 | `customer_id` | Rattache le point de livraison au client titulaire, et sert de clé de jointure vers `ref_customer`. | complétude, intégrité référentielle | à remplir | 220 valeurs distinctes, 0 orphelin (traité au Niveau 0 de `ref_customer`) | | |
-| `contracted_capacity_kw` | Donne la puissance souscrite au raccordement, en kilowatts. | ordre de grandeur, convention d'unité, complétude | à remplir | | | |
+| `contracted_capacity_kw` | Donne la puissance souscrite au raccordement, en kilowatts. | ordre de grandeur, convention d'unité, complétude | voir ci-dessous | voir ci-dessous | | |
 | `commodity` | Indique l'énergie livrée sur ce point de livraison. | domaine de valeurs, complétude | à remplir | | | |
 | `monitored` | Indique si le site est suivi en granularité horaire. | domaine de valeurs, complétude | environ 500 à 1 (traité au Niveau 0) | domaine `{0, 1}`, 0 nul, 500 à 1 et 900 à 0 | 0 | conforme |
 | `profile_type` | Donne le profil de consommation type servant à estimer la courbe de charge d'un site non télérelevé. | domaine de valeurs, complétude | à remplir | | | |
 | `region` | Localise le point de livraison à la maille région administrative. | domaine de valeurs, complétude | à remplir | | | |
 | `dso` | Nomme le gestionnaire de réseau de distribution qui achemine l'énergie jusqu'au compteur. | domaine de valeurs, dépendance fonctionnelle, cohérence physique | voir ci-dessous | voir ci-dessous | | |
+
+### `contracted_capacity_kw` : seule mesure du référentiel
+
+Seule grandeur numérique de `ref_site`, et seule colonne du référentiel sur laquelle un ordre de
+grandeur et une convention d'unité peuvent être testés plutôt qu'une simple liste de modalités. Elle
+servira de grandeur de référence en Mission 4 pour détecter des volumes horaires exprimés dans une
+autre unité.
+
+**Prédictions, écrites avant exécution :**
+
+| # | Promesse | Classe | Prédiction | Justification |
+|---|---|---|---|---|
+| 1 | La colonne est toujours renseignée | complétude | **0 nul** | la puissance souscrite est une donnée contractuelle : sans elle, ni raccordement ni tarif d'acheminement, donc pas de facturation possible |
+| 2 | Les valeurs sont strictement positives | domaine | **aucune valeur ≤ 0** | on ne délivre pas de puissance négative ; 0 est exclu parce que la table est un état courant et qu'un site résilié n'y figure plus |
+| 3 | Les valeurs sont plausibles pour un site B2B raccordé au réseau de distribution | ordre de grandeur | **minimum 36 kW, maximum 50 000 kW** | 36 kW est l'ordre de grandeur qui sépare un particulier ou un très petit professionnel d'un site de taille supérieure ; au-delà d'environ 40 à 50 MW un site n'est plus raccordé au réseau de distribution mais au réseau de transport, or `dso` désigne des distributeurs |
+| 4 | Les sites télérelevés sont les gros raccordements | cohérence inter-colonnes | les 500 sites `monitored = 1` détiennent **90 %** de la puissance souscrite totale | promesse formulée lors du cadrage de `monitored` : un site est télérelevé parce qu'il est gros. Point neutre : 35,7 %, la part que ces sites représentent en nombre de lignes. Toute valeur proche de 35,7 % réfuterait la promesse |
+
+**Réserve d'unité.** La colonne est nommée en kilowatts. En France, la puissance souscrite est
+contractualisée tantôt en kVA (puissance apparente) tantôt en kW (puissance active), les deux étant
+liées par le facteur de puissance, en général compris entre 0,9 et 1. Les prédictions ci-dessus sont
+formulées en kW, conformément au nom de la colonne. Un écart systématique d'environ 10 % sur une
+sous-population pourrait signaler une saisie en kVA.
+
+**Grandeurs déjà connues, donc non prédictibles.** Le total de la colonne vaut 5 242 077 kW et la
+moyenne 3 744 kW par site. Ces deux valeurs ont été calculées lors du chiffrage de l'anomalie `dso`,
+sans prédiction préalable, et ne sont pas opposables. La médiane, le minimum et le maximum n'ont pas
+été mesurés et restent prédictibles. L'écart entre médiane et moyenne renseignera sur l'asymétrie de
+la distribution.
+
+**Test prévu :**
+
+```python
+df_ref_site.groupby("monitored")["contracted_capacity_kw"].agg(["count", "median", "mean", "sum"])
+```
 
 ### `dso` : dépendance fonctionnelle et cohérence physique
 
