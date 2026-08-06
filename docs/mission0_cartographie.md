@@ -588,7 +588,100 @@ prédiction falsifiable.*
 
 # 3. `ref_contract`
 
-*à ouvrir une fois `ref_site` clos*
+Colonnes : `contract_id`, `customer_id`, `commodity`, `start_date`, `end_date`, `pricing_type`,
+`volume_tolerance_pct`.
+
+Première table du référentiel à porter des dates. Première à contenir une mesure exprimée en
+pourcentage. Elle porte deux des trois questions à trancher de la Mission 0 : la reconstruction du
+lien site vers contrat, et le décompte des sites relevant d'un contrat inexistant ou expiré.
+
+## Niveau 0 - cadrage
+
+**Que représente une ligne** (une phrase, nom au singulier) :
+
+Une ligne représente un contrat, expiré, en cours, ou futur, d'un client de la plateforme B2B France gaz et électricité portant sur une commodité. Les contrats successifs d'un client coexistent dans la table au lieu de s'écraser. Un client peut avoir plusieurs contrats, mais un contrat ne peut pas concerner plusieurs clients.
+
+**Maille** :
+
+Une ligne par *contract_id*. 
+- Pas de *contract_id x customer_id* car un contrat n'appartient qu'à un seul client : *customer_id* est déterminé par *contract_id* et n'ajoute aucun pouvoir discriminant. 
+- pas de *contract_id x date*, 
+- pas de *contract_id x site*
+- pas de *contract_id x commodity*
+
+**Clés candidates** (colonnes seules ou combinées qui devraient identifier une ligne) :
+
+*contract_id*.
+
+*(customer_id, commodity)* ne peut pas représenter une clé candidate : un client qui renouvelle son contrat reste dans la table par historique. Donc non unique.
+
+**Nombre de lignes prédit**, et le raisonnement qui y mène :
+
+**Plancher, à partir de faits établis.**
+
+| Fait | Source |
+|---|---|
+| 146 clients sur 220 ont au moins un contrat | anti-jointure, Niveau 0 de `ref_customer` |
+| 37 clients porteurs de contrats ont des contrats dans les deux commodités | mesuré sur `ref_contract`, voir réserve ci-dessous |
+
+```
+ 37 clients bi-commodité   x 2 contrats minimum  =  74
+109 clients mono-commodité x 1 contrat minimum   = 109
+                                        plancher = 183 lignes au total
+```
+
+Ce plancher porte sur le **nombre total de lignes**, toutes dates confondues, puisque le comptage des
+37 clients bi-commodité n'applique aucun filtre temporel. Il ne dit rien du nombre de contrats en
+vigueur.
+
+La prédiction totale vaut 183 multiplié par le **facteur de renouvellement**, c'est-à-dire le nombre
+moyen de générations de contrats que la table conserve par client.
+
+**Facteur de renouvellement retenu : 2.** La table conserverait la génération en cours et une
+génération précédente. Sur des contrats pluriannuels de l'ordre de trois ans, cela correspond à un
+historique d'environ cinq à six ans, ce qui est cohérent avec une base d'extraction alimentant un
+suivi de position sur l'année de livraison 2026 et les deux suivantes.
+
+**Prédiction de volumétrie : environ 370 lignes, intervalle [275 ; 460].** L'intervalle est large et
+assumé : il traduit l'incertitude sur le facteur de renouvellement, qui est le seul inconnu réel.
+Une tolérance étroite serait ici une tolérance inventée.
+
+**Prédictions annexes, sur des grandeurs jamais affichées.**
+
+Les trois parts ci-dessous portent sur la même table et doivent sommer à 100 % : un contrat est soit
+expiré, soit en vigueur, soit à venir au 24 juillet 2026.
+
+| # | Promesse | Prédiction | Raisonnement |
+|---|---|---|---|
+| A | Nombre de contrats par client | minimum 1, maximum de l'ordre de 4 à 6, en tout état de cause inférieur à 10 | un client détient au plus un contrat par commodité et par génération ; deux commodités et deux générations bornent le maximum |
+| B | Part des contrats expirés (`end_date` antérieure au 24 juillet 2026) | **environ 50 %**, intervalle [35 % ; 65 %] | découle directement du facteur de renouvellement de 2 : la génération précédente représente la moitié des lignes. Une part supérieure à 65 % impliquerait un facteur supérieur à 3, donc un historique d'une quinzaine d'années, incompatible avec une base d'extraction. Une part inférieure à 35 % contredirait l'affirmation de Niveau 0 selon laquelle les contrats successifs coexistent |
+| C | Part des contrats à venir (`start_date` postérieure au 24 juillet 2026) | **entre 0 et 10 %** | un renouvellement se signe plusieurs mois avant sa date de prise d'effet, il est donc normal qu'une petite part des lignes ne soit pas encore entrée en vigueur. Une part nulle signalerait que la table ne conserve que les contrats déjà démarrés, ce qui contredirait la phrase de Niveau 0 qui annonce des contrats futurs |
+| D | Part des contrats en vigueur, par complément | environ 45 %, soit de l'ordre de 165 lignes | complément de B et C. À rapprocher des 146 clients porteurs de contrats : cela donnerait environ 1,1 contrat en vigueur par client, cohérent avec le fait que 37 clients seulement sont bi-commodité |
+
+
+**Prédiction brûlée, à ne pas compter comme opposable.**
+
+La part de clients bi-commodité côté contrats devait faire l'objet d'une prédiction. Elle a été
+mesurée avant que la prédiction soit écrite : **37 clients sur 146**, soit 25,3 %.
+
+Ce chiffre est à rapprocher de la mesure correspondante sur `ref_site` : **188 clients sur 220**, soit
+85,5 %, disposent de sites dans les deux commodités. L'écart est considérable. La majorité des clients
+est fournie en gaz et en électricité alors qu'un quart seulement est contractualisé dans les deux
+énergies. Beaucoup de clients détiennent donc des sites dans une commodité pour laquelle aucun contrat
+n'existe.
+
+Point reporté au **Niveau 2**. Il alimente la troisième question à trancher de la Mission 0, celle des
+sites relevant d'un contrat inexistant, et il est plus discriminant que le décompte des 74 clients sans
+aucun contrat. Ne pas conclure avant que le lien site vers contrat soit reconstruit.
+
+**Résultat et écart** :
+
+> à remplir après exécution
+
+## Niveau 1 - colonnes
+
+| Colonne | Promesse du nom | Classe | Prédiction | Résultat | Écart | Verdict |
+|---|---|---|---|---|---|---|
 
 ---
 ---
