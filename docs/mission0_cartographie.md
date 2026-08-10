@@ -676,7 +676,157 @@ aucun contrat. Ne pas conclure avant que le lien site vers contrat soit reconstr
 
 **Résultat et écart** :
 
-> à remplir après exécution
+Tests exécutés dans `notebooks/mission0_cartographie.ipynb`, section `ref_contract`.
+
+| Promesse | Prédiction | Résultat | Écart |
+|---|---|---|---|
+| Volumétrie | ~370, intervalle [275 ; 460] | **260** | **falsifiée**, 15 lignes sous la borne basse |
+| `contract_id` unique | unique | 260 / 260 | **0** |
+| Clients porteurs de contrats | 146 | 146 | **0** |
+| A, contrats par client | min 1, max 4 à 6, en tout état de cause < 10 | min 1, **max 7** | **partiellement falsifiée** : au-dessus de la fourchette, sous la borne de sécurité |
+| B, part des expirés | 50 %, intervalle [35 % ; 65 %] | **28,1 %** (73 lignes) | **falsifiée**, sous la borne basse |
+| C, part des contrats à venir | 0 à 10 % | **0 %** (0 ligne) | confirmée à la borne |
+| D, part en vigueur | ~45 %, ~165 lignes | **71,9 %** (187 lignes) | **falsifiée** |
+
+Contrôle de somme : 73 + 0 + 187 = 260. Aucune ligne n'échappe aux trois filtres, donc aucune date
+nulle et la convention de bornes retenue est la bonne.
+
+**Distribution des contrats par client**
+
+| Contrats | Clients |
+|---|---|
+| 1 | 76 |
+| 2 | 39 |
+| 3 | 22 |
+| 4 | 7 |
+| 5 | 1 |
+| 7 | 1 |
+
+Somme de contrôle : 146 clients, 260 contrats. Le client à 7 contrats implique, avec deux commodités
+seulement, au moins un couple client-commodité portant 4 contrats successifs.
+
+### Une seule hypothèse fausse explique trois écarts
+
+Le facteur retenu était de 2 contrats par couple client-commodité. La réalité donne :
+
+```
+260 lignes / 183 couples = 1,42
+```
+
+La volumétrie, la part d'expirés et la part en vigueur ne sont pas trois erreurs indépendantes : ce
+sont trois conséquences d'un seul paramètre mal calibré. La couche historique est plus mince que
+prévu, donc moins d'expirés et davantage de contrats en vigueur. Le modèle de Niveau 0 est juste,
+seule sa profondeur temporelle était surestimée.
+
+Correction de vocabulaire par rapport à la prédiction : 183 n'est pas un nombre de renouvellements
+mais le nombre de couples client-commodité, donc de premiers contrats. Les renouvellements sont les
+77 lignes excédentaires, et ils sont bornés par le nombre de contrats expirés puisqu'on ne renouvelle
+pas un contrat en cours.
+
+### La validation apparente du modèle était fausse
+
+Premier constat, séduisant et trompeur :
+
+```
+plancher structurel   183 couples
+contrats en vigueur   187
+écart                   4
+```
+
+Quatre lignes d'écart ressemble à une confirmation du modèle « un contrat en cours par client et par
+commodité ». C'est faux. Le détail par couple donne :
+
+| Mesure | Valeur |
+|---|---|
+| Couples client-commodité au total | 183 |
+| dont ayant au moins un contrat en vigueur | 146 |
+| dont **aucun** contrat en vigueur | **37** |
+| Couples portant **plusieurs** contrats en vigueur | **35** |
+| Contrats en excès sur ces couples | **41** |
+
+```
+41 contrats en trop  -  37 couples découverts  =  4
+```
+
+Les quatre lignes d'écart ne sont pas un petit résidu : c'est la **différence entre deux défauts
+opposés de grande taille qui se compensent presque**. Un agrégat qui tombe juste peut masquer deux
+erreurs importantes de sens contraire.
+
+**Troisième contrôle vert sur données fausses du projet**, et le plus instructif des trois. Le premier
+venait d'une requête fautive, le deuxième d'une convention d'encodage, celui-ci d'une **compensation
+entre deux anomalies**. Aucune relecture de code ne l'aurait détecté : il fallait descendre d'une
+maille, du total vers le couple.
+
+Contrôle à ajouter au harnais : **un total qui correspond ne prouve rien tant qu'il n'a pas été
+décomposé à la maille inférieure.**
+
+### Défaut A : couverture en double
+
+35 couples client-commodité portent deux ou trois contrats en vigueur simultanément au 24 juillet
+2026, dont 6 en portent trois. Soit **41 contrats en excès**.
+
+| Rapporté à | Part |
+|---|---|
+| Couples ayant un contrat actif (146) | **24,0 %** |
+| Contrats en vigueur (187) | **21,9 %** |
+| Lignes de la table (260) | 15,8 % |
+
+Un même client, sur la même énergie, sous deux ou trois contrats actifs à la même date. C'est
+impossible métier : le client serait fourni et facturé plusieurs fois pour la même consommation, et le
+desk couvrirait plusieurs fois le même volume.
+
+**Retenu comme deuxième famille d'anomalies** parmi les quatre annoncées. Le défaut est structuré et
+non diffus : 35 couples nettement identifiés, avec une concentration apparente sur `POWER`.
+
+*Alternative écartée* : des contrats successifs dont les bornes se recouvrent d'un jour ou deux lors
+d'un renouvellement, ce qui serait un artefact de saisie sans portée. Écartée en l'état parce que le
+recouvrement porterait alors sur une fenêtre étroite, alors qu'ici il est constaté à une date de
+référence unique et arbitraire, le 24 juillet. À confirmer en mesurant la durée réelle des
+recouvrements.
+
+**Limite de chiffrage.** L'impact ne peut pas être exprimé en MWh ni en euros à ce stade :
+`ref_contract` ne porte aucun volume, `volume_tolerance_pct` étant une marge et non une quantité. Le
+chiffrage volumétrique passera par les sites, donc par le Niveau 2.
+
+### Défaut B : couverture absente
+
+37 couples client-commodité ont eu un contrat par le passé mais n'en ont aucun en vigueur au
+24 juillet 2026.
+
+*Attention à une coïncidence piégeuse* : ce 37 n'a aucun rapport avec les 37 clients bi-commodité
+mesurés plus haut. Même nombre, mailles différentes.
+
+Le constat s'élargit quand on le rapporte à la couverture réelle en énergie :
+
+| Périmètre, à la maille client-commodité | Couples |
+|---|---|
+| Ayant au moins un **site** | 188 × 2 + 32 × 1 = **408** |
+| Ayant eu un **contrat**, à n'importe quelle date | 183 |
+| Ayant un contrat **en vigueur** | 146 |
+
+Sur 408 couples effectivement fournis en énergie, 146 seulement sont couverts par un contrat en
+vigueur. Aux 37 couples qui n'ont plus de contrat s'ajoutent 225 couples qui n'en ont jamais eu.
+
+**Non tranché, reporté au Niveau 2.** Ces nombres sont à la maille client-commodité, alors que la
+troisième question du sujet porte sur les **sites**. Le passage de l'une à l'autre suppose le lien
+site vers contrat, qui n'est pas matérialisé et reste à reconstruire.
+
+### Révision de la phrase de Niveau 0
+
+La phrase annonce des contrats « expiré, en cours, ou **futur** ». La table n'en contient **aucun de
+futur** : 0 ligne sur 260 a une `start_date` postérieure au 24 juillet 2026. La phrase est donc fausse
+sur ce point et se corrige en « expiré ou en cours ».
+
+Deux lectures de cette absence, à départager plus tard : soit la table ne conserve que les contrats
+déjà entrés en vigueur, soit les renouvellements sont enregistrés à leur date d'effet et non à leur
+date de signature. La seconde impliquerait qu'un contrat signé aujourd'hui pour janvier prochain est
+invisible dans le référentiel, ce qui serait une limite sérieuse pour le dimensionnement des
+couvertures.
+
+*Note d'honnêteté* : la prédiction initiale sur ce point était de 0 %, et elle a été élargie à
+[0 % ; 10 %] au motif qu'un 0 contredirait la phrase de Niveau 0. C'est la prédiction initiale qui
+était la bonne, et la révision qui a affaibli le test. La contradiction relevée était réelle, mais
+elle portait sur la phrase de Niveau 0, pas sur la prédiction.
 
 ## Niveau 1 - colonnes
 
