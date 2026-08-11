@@ -849,6 +849,83 @@ Ce qui est déjà acquis par le Niveau 0 et n'a pas à être retesté : `contrac
 `customer_id` compte 146 valeurs distinctes sans orphelin, et aucune des deux dates n'est nulle,
 puisque les trois filtres temporels totalisent exactement 260 lignes.
 
+### Résultat et écart
+
+| Promesse | Prédiction | Résultat | Écart |
+|---|---|---|---|
+| Dates inversées | 0 | **0** | **0** |
+| Durée des contrats | entre 1 et 3 ans | min 1, médiane 2, max 3 | **0** |
+| `volume_tolerance_pct` nulle | 0 | 0 sur 260 | **0** |
+| `volume_tolerance_pct` négative ou nulle | 0 | 0 | **0** |
+| `volume_tolerance_pct`, plage de valeurs | entre 10 et 20 | **min 5**, max 20 | **partiellement falsifiée**, borne basse dépassée |
+| `volume_tolerance_pct`, convention | [0 ; 100] | valeurs 5, 10, 15, 20 | **0** |
+| `commodity`, domaine | {GAS, POWER} | 2 modalités | **0** |
+| `pricing_type`, nombre de modalités | 2 | **4** | **falsifiée**, +2 |
+
+**Distribution de `volume_tolerance_pct`**
+
+| Valeur | Contrats | Part |
+|---|---|---|
+| 5 | 53 | 20,4 % |
+| 10 | 78 | 30,0 % |
+| 15 | 65 | 25,0 % |
+| 20 | 64 | 24,6 % |
+
+Les quatre valeurs forment une grille régulière de 5 en 5. Ce n'est pas une distribution continue mais
+un **barème**, ce qui explique que la borne basse ait été dépassée : la fourchette usuelle de 10 à 20 %
+décrit une pratique de marché, pas une échelle de valeurs contractuelles. Une bande de 5 % est serrée
+mais légitime, typiquement sur un site à consommation très prévisible.
+
+**Distribution de `pricing_type` croisée avec `commodity`**
+
+| `pricing_type` | POWER | GAS | Total | Part |
+|---|---|---|---|---|
+| FIXED | 75 | 40 | **115** | 44,2 % |
+| INDEXED | 36 | 23 | **59** | 22,7 % |
+| CLICK | 34 | 20 | **54** | 20,8 % |
+| SPOT_PASSTHROUGH | 22 | 10 | **32** | 12,3 % |
+| **Total** | 167 | 93 | 260 | |
+
+Les parts par commodité s'écartent de moins de trois points des parts globales : `pricing_type` et
+`commodity` sont indépendants. Ce constat n'appelle aucune remarque, rien dans le métier n'imposant
+qu'un mode de fixation du prix dépende de l'énergie livrée. Au passage, 93 contrats gaz sur 260 font
+35,8 %, proche des 37,2 % de sites gaz mesurés sur `ref_site`.
+
+### `pricing_type` détermine ce que le desk doit couvrir
+
+La prédiction de deux modalités reposait sur une vision incomplète du produit. Les quatre modalités
+observées ne sont pas des étiquettes équivalentes : elles déterminent **qui porte le risque de prix**,
+donc le volume que le desk doit couvrir sur le marché de gros.
+
+| Modalité | Qui porte le risque de prix | Couverture attendue |
+|---|---|---|
+| `FIXED` | le fournisseur, intégralement | 100 % du volume, dès la signature |
+| `INDEXED` | partagé, le prix suit un indice | partielle |
+| `CLICK` | le client, qui fixe son prix par tranches successives | progressive, construite au fil des clics |
+| `SPOT_PASSTHROUGH` | le client, le prix spot lui est répercuté | quasi nulle |
+
+`CLICK` est la modalité la plus spécifique au B2B. Le client fige une fraction de son volume au prix
+forward du jour, à des moments qu'il choisit pendant la vie du contrat. Entre deux clics, la position
+reste ouverte. C'est un produit structuré, ce qui donne son sens au book `B2B_FR_STRUCT` observé dans
+`trd_deal`.
+
+**Conséquence pour la Mission 2.** Le taux de couverture attendu diffère selon `pricing_type`.
+Comparer la position couverte au volume client sans distinguer ces quatre modalités produirait un
+déséquilibre apparent qui n'en serait pas un : 12,3 % des contrats n'appellent quasiment aucune
+couverture, et 20,8 % en appellent une construite progressivement. Segmentation à reprendre au moment
+de croiser position et volumes clients.
+
+### Verdict du Niveau 1 de `ref_contract`
+
+**Aucune anomalie.** Les deux prédictions falsifiées le sont par défaut de connaissance métier de ma
+part, non par défaut de la donnée : la grille de tolérance est régulière, les dates sont cohérentes,
+les durées sont conformes à des contrats pluriannuels, et les quatre modalités de tarification sont
+toutes légitimes.
+
+Les deux défauts de cette table sont ceux identifiés au Niveau 0, la couverture en double et la
+couverture absente, et ils portent sur la structure des lignes, pas sur le contenu des colonnes.
+
+
 ---
 
 # Niveau 2 - relations entre tables
