@@ -1070,6 +1070,76 @@ opposés dont un simple `count(*)` ne montrerait que la résultante.
 Troisième occurrence de ce mécanisme, après la fausse validation du plancher de 183 et le contrôle de
 somme à 260. Même conclusion : un agrégat ne se lit pas sans être décomposé à la maille inférieure.
 
+### Résultat et écart
+
+Mesures réalisées avec `pandas.merge(..., indicator=True)`, qui produit une partition exclusive et
+exhaustive en trois catégories sans reposer sur aucune hypothèse de nullité, contrairement à
+l'anti-jointure `left join ... is null` qui suppose que la colonne testée ne peut pas être nulle par
+elle-même.
+
+**Couples client-commodité, fusion externe des deux côtés :**
+
+```
+left_only   270    couples ayant des sites, sans contrat en vigueur
+both        138    couples couverts
+right_only    8    couples ayant un contrat en vigueur, sans aucun site
+```
+
+Contrôles : `270 + 138 = 408` côté sites, `138 + 8 = 146` côté contrats. Les deux dénombrements
+déduits au moment de la prédiction sont confirmés.
+
+| # | Grandeur | Prédiction | Résultat | Écart |
+|---|---|---|---|---|
+| | Couples côté sites | 408, déduit | **408** | **0** |
+| | Couples sous contrat en vigueur | 146 | **146** | **0** |
+| A | Lignes de la jointure interne | ~640 | **648** | +8, soit +1,3 % |
+| | Lignes de la jointure externe | ~1 540 | **1 547** | +7 |
+| B | Sites orphelins | au moins 900, [750 ; 1 000] | **899** | dans l'intervalle, mais le plancher « au moins 900 » est faux d'une unité |
+| C | Puissance des sites orphelins | 3,37 M kW, soit 64,2 % | **3 402 619 kW**, soit **64,91 %** | +0,7 point |
+| D | Couples contrats sans site | quelques dizaines | **8** | ordre de grandeur surestimé |
+
+### La réserve sur le plancher était fondée
+
+La prédiction B signalait que `408 - 146 = 262` était un plancher et non une valeur, la soustraction
+supposant une inclusion non démontrée. Elle ne l'est effectivement pas : **8 couples ont un contrat en
+vigueur sans aucun site**. Seuls 138 couples-sites sont donc couverts, et les orphelins sont **270**,
+non 262.
+
+### Le 899 tombe juste pour de mauvaises raisons
+
+La dérivation prédite était `262 couples × 3,43 sites = 899,4`. Le réel est `270 couples × 3,33
+sites = 899`.
+
+Les deux composantes sont fausses et dans des sens opposés : le nombre de couples découverts était
+sous-estimé, le nombre de sites par couple surestimé. Les erreurs se compensent presque exactement.
+
+**Quatrième occurrence du mécanisme de compensation dans cette mission**, après la fausse validation du
+plancher de 183, le contrôle de somme à 260 et la jointure qui perd et duplique simultanément. C'est
+l'enseignement le plus solide de la Mission 0 : **un résultat juste ne valide pas le raisonnement qui y
+mène**, et seule la décomposition permet de le savoir.
+
+Note complémentaire sur C : les sites orphelins pèsent 64,91 % de la puissance pour 64,21 % des lignes.
+L'écart de 0,7 point est faible, l'absence de contrat ne se concentre donc ni sur les gros sites ni sur
+les petits.
+
+### Candidat d'anomalie : 8 couples sous contrat sans point de livraison
+
+8 couples `(client, commodité)` portent un contrat **en vigueur** au 24 juillet 2026 alors que le
+client ne possède **aucun site** dans cette commodité. Le desk serait engagé à fournir une énergie
+qu'il ne livre nulle part, et couvrirait un volume sans point de livraison associé.
+
+L'explication la plus naturelle, un contrat signé par anticipation avant raccordement du site, ne tient
+pas : le Niveau 1 a établi qu'il n'existe **aucun contrat futur** dans la table, tous les contrats ont
+déjà pris effet.
+
+Deux lectures restent ouvertes : soit les sites correspondants ont été supprimés du référentiel alors
+que leurs contrats subsistent, soit la commodité est mal renseignée sur l'une des deux tables. La
+seconde est plausible compte tenu de la famille d'anomalies n° 1, où trois colonnes descriptives de
+`ref_site` se sont révélées aléatoires, mais `commodity` n'en fait pas partie et son domaine est propre
+des deux côtés.
+
+Population faible, incohérence franche. À rapprocher des quatre familles annoncées, sans conclure.
+
 ## Point ouvert reporté du Niveau 0 de `ref_customer`
 
 74 clients sur 220 n'ont aucune ligne dans `ref_contract`, alors que tous ont au moins un site.
