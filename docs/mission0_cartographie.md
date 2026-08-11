@@ -945,16 +945,130 @@ Pour chaque paire, dans cet ordre :
 
 ## Paires identifiées
 
-| # | Paire | Colonne de jointure présumée | Cardinalité prédite | Statut |
-|---|-------|------------------------------|---------------------|--------|
-| 1 | `ref_site` → `ref_customer` | `customer_id` | | partiellement traité au Niveau 0 de `ref_customer` (0 orphelin dans les deux sens sur l'existence) |
-| 2 | `ref_contract` → `ref_customer` | `customer_id` | | idem, plus 74 clients sans contrat |
-| 3 | `ref_site` ↔ `ref_contract` | **aucune clé étrangère** | | question centrale de la Mission 0 : sur quoi reconstruire le lien, et combien de lignes le choix laisse de côté |
-| 4 | `volumes_hourly` → `ref_site` | `site_id` | | |
-| 5 | `actuals_daily` → `ref_site` | `site_id` | | |
-| 6 | `pos_snapshot` ↔ `trd_deal` | `book`, `commodity`, mois de livraison | | |
-| 7 | `mkt_forward_curve` ↔ `trd_deal` | `commodity`, mois de livraison | | |
-| 8 | `bo_confirmations` ↔ `trd_deal` | `deal_ref` / `deal_id` | | clé non propre, voir Mission 1 |
+| # | Paire | Colonne de jointure | Cardinalité | Statut |
+|---|-------|---------------------|-------------|--------|
+| 1 | `ref_site` → `ref_customer` | `customer_id` | un à plusieurs | **traitée**, voir ci-dessous |
+| 2 | `ref_contract` → `ref_customer` | `customer_id` | un à plusieurs | **traitée**, voir ci-dessous |
+| 3 | `ref_site` ↔ `ref_contract` | `(customer_id, commodity)` + filtre temporel | plusieurs à plusieurs | **prédite**, mesure à venir |
+| 4 | `volumes_hourly` → `ref_site` | `site_id` | | Mission 4 |
+| 5 | `actuals_daily` → `ref_site` | `site_id` | | Mission 5 |
+| 6 | `pos_snapshot` ↔ `trd_deal` | `book`, `commodity`, mois de livraison | | Mission 2 |
+| 7 | `mkt_forward_curve` ↔ `trd_deal` | `commodity`, mois de livraison | | Mission 3 |
+| 8 | `bo_confirmations` ↔ `trd_deal` | `deal_ref` / `deal_id` | | clé non propre, Mission 1 |
+
+Les paires 4 à 8 ne sont pas traitées en Mission 0 : elles engagent des tables dont le cadrage est
+renvoyé à la mission qui les exploite.
+
+## Paire 1 : `ref_site` → `ref_customer`
+
+**Colonne de jointure** : `customer_id`. Seule colonne commune aux deux tables, et clé candidate de
+`ref_customer`, établie unique et non nulle au Niveau 0. Une jointure sur une clé candidate du côté
+référencé est la seule qui garantisse qu'une ligne de gauche ne rencontre au plus qu'une ligne de
+droite.
+
+**Cardinalité : un à plusieurs.** Un client possède plusieurs sites, un site appartient à un seul
+client. Côté `ref_site`, la cardinalité vaut 1 par construction, la maille étant le site et chaque
+ligne ne portant qu'un `customer_id`. Côté `ref_customer`, 1 400 sites pour 220 clients établissent
+que « plusieurs » est bien atteint.
+
+**Orphelins, comptés séparément :**
+
+| Sens | Résultat |
+|---|---|
+| de `ref_site` vers `ref_customer` | **0** : tout `customer_id` de `ref_site` existe dans `ref_customer` |
+| de `ref_customer` vers `ref_site` | **0** : tout client possède au moins un site |
+
+**Nombre de lignes de la jointure : exactement 1 400.** La clé du côté référencé étant unique, aucune
+ligne n'est dupliquée ; aucun orphelin d'aucun côté, donc aucune ligne perdue. Jointure interne et
+jointure externe donnent ici le même résultat.
+
+C'est le cas de référence auquel comparer les deux paires suivantes.
+
+## Paire 2 : `ref_contract` → `ref_customer`
+
+**Colonne de jointure** : `customer_id`, même justification qu'à la paire 1.
+
+**Cardinalité : un à plusieurs.** 260 contrats pour 146 clients porteurs, la distribution mesurée au
+Niveau 1 allant jusqu'à 7 contrats pour un même client.
+
+**Orphelins, comptés séparément :**
+
+| Sens | Résultat |
+|---|---|
+| de `ref_contract` vers `ref_customer` | **0** : aucun contrat ne pointe vers un client inexistant |
+| de `ref_customer` vers `ref_contract` | **74 clients** sans aucun contrat |
+
+Ces deux échecs n'auraient pas la même signification. Le premier serait une rupture d'intégrité
+référentielle, défaut de données franc sans lecture métier possible. Le second signifie seulement
+qu'un client n'a pas de contrat, ce qui peut relever d'une réalité métier. D'où l'exigence de les
+compter séparément.
+
+**Nombre de lignes de la jointure :**
+
+| Type | Lignes |
+|---|---|
+| Interne | **260**, aucune duplication et aucune perte côté contrats |
+| Externe depuis `ref_customer` | **334**, soit 260 plus les 74 clients sans contrat |
+
+**Différence décisive avec la paire 1.** La paire 1 n'ayant d'orphelin d'aucun côté, les deux types de
+jointure coïncident. La paire 2 en a 74 d'un seul côté : interne et externe divergent d'autant. Un
+reporting construit sur une jointure interne perdrait silencieusement 74 clients, sans qu'aucun total
+ne le signale.
+
+## Paire 3 : `ref_site` ↔ `ref_contract`
+
+C'est la deuxième question à trancher de la Mission 0.
+
+**Colonne de jointure.** Aucune clé étrangère ne matérialise ce lien. Les deux tables n'ont que deux
+colonnes en commun, `customer_id` et `commodity`. Le lien se reconstruit donc sur le couple
+`(customer_id, commodity)`, complété du filtre `start_date <= '2026-07-24' and end_date >= '2026-07-24'`,
+un site devant être rattaché à un contrat en vigueur et non à un contrat expiré.
+
+*Alternative écartée* : joindre sur `customer_id` seul. Elle rattacherait un site gaz à un contrat
+électricité du même client, ce qui n'a pas de sens métier, et gonflerait artificiellement le nombre
+d'appariements.
+
+**Cardinalité prédite : plusieurs à plusieurs.** Contrairement aux paires 1 et 2, la clé de jointure
+n'est unique d'aucun des deux côtés. Un couple porte plusieurs sites et jusqu'à trois contrats en
+vigueur.
+
+**Base de calcul.** Les couples `(client, commodité)` se dénombrent des deux côtés :
+
+| Côté | Construction | Couples |
+|---|---|---|
+| `ref_site` | 188 clients bi-commodité × 2 + 32 mono-commodité × 1 | **408** |
+| `ref_contract`, toutes dates | 37 clients bi-commodité × 2 + 109 mono-commodité × 1 | **183** |
+| `ref_contract`, en vigueur au 24/07/2026 | mesuré au Niveau 0 | **146** |
+
+Encadrement de vraisemblance : avec 220 clients et 2 commodités, le nombre de couples côté sites est
+nécessairement compris entre 220 et 440. Côté contrats, entre 146 et 292. Les deux valeurs s'y
+inscrivent.
+
+**Prédictions**, sous hypothèse d'une répartition uniforme des sites entre les 408 couples, soit
+1 400 / 408 = **3,43 sites par couple**. C'est le pari neutre, faute d'élément indiquant que les
+couples couverts seraient plus gros.
+
+| # | Grandeur | Prédiction | Dérivation |
+|---|---|---|---|
+| A | Lignes de la jointure interne | **environ 640** | 187 contrats en vigueur × 3,43 sites par couple |
+| B | Sites orphelins, sans contrat en vigueur | **au moins 900**, intervalle [750 ; 1 000] | au moins 262 couples découverts sur 408, soit 64,2 % de 1 400 |
+| C | Puissance des sites orphelins | **environ 3,37 M kW**, soit 64,2 % | prédiction neutre : les sites orphelins sont de taille moyenne |
+| D | Contrats orphelins, sans site correspondant | **faible, quelques dizaines** | un contrat sur une commodité où le client ne possède aucun site |
+
+**Pourquoi B est un plancher et non une valeur.** Le calcul 408 - 146 = 262 suppose que les 146 couples
+sous contrat sont tous inclus dans les 408 couples ayant des sites. Rien ne le garantit : un client
+peut détenir un contrat gaz en vigueur sans posséder le moindre site gaz, ce qui est précisément
+l'objet de la prédiction D. Si de tels cas existent, moins de 146 couples-sites sont couverts et le
+nombre de sites orphelins dépasse 900. Une soustraction entre deux ensembles n'a de sens que si
+l'un est inclus dans l'autre, et l'inclusion n'est pas établie.
+
+**Piège à signaler.** La jointure interne rendrait environ **640 lignes pour 1 400 sites**, donc moins
+que le nombre de sites, alors qu'elle en duplique une partie : les sites appartenant aux 35 couples
+multi-contrats apparaîtront deux ou trois fois. Perte massive et duplication partielle sont deux effets
+opposés dont un simple `count(*)` ne montrerait que la résultante.
+
+Troisième occurrence de ce mécanisme, après la fausse validation du plancher de 183 et le contrôle de
+somme à 260. Même conclusion : un agrégat ne se lit pas sans être décomposé à la maille inférieure.
 
 ## Point ouvert reporté du Niveau 0 de `ref_customer`
 
