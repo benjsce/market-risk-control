@@ -830,10 +830,25 @@ elle portait sur la phrase de Niveau 0, pas sur la prédiction.
 
 ## Niveau 1 - colonnes
 
+Ordre retenu : clés et colonnes de jointure, puis les dates qui commandent la validité du contrat,
+puis la mesure, puis les descriptifs. Les dates passent avant `volume_tolerance_pct` bien qu'elles ne
+soient pas des clés : ce sont elles qui déterminent si une ligne est en vigueur, et tout le Niveau 0
+repose déjà dessus.
+
 | Colonne | Promesse du nom | Classe | Prédiction | Résultat | Écart | Verdict |
 |---|---|---|---|---|---|---|
+| `contract_id` | Identifie un contrat de façon unique et stable. | unicité, complétude | unique et non nul (traité au Niveau 0) | 260 lignes / 260 distincts | 0 | conforme |
+| `customer_id` | Rattache le contrat au client signataire, et sert de clé de jointure vers `ref_customer`. | complétude, intégrité référentielle | 146 valeurs distinctes, 0 orphelin (traité au Niveau 0) | 146 distincts, 0 orphelin | 0 | conforme |
+| `start_date` et `end_date` | Donnent la date de prise d'effet et la date d'échéance du contrat. | cohérence de couple | **0 ligne** avec `start_date` postérieure à `end_date` : une base de gestion contractuelle contrôle en principe cette cohérence à la saisie | | | |
+| `start_date` et `end_date` | La durée séparant les deux bornes. | ordre de grandeur | durée comprise **entre 1 et 3 ans**, le sujet qualifiant les contrats de pluriannuels | | | |
+| `volume_tolerance_pct` | Donne la marge autour du volume prévisionnel à l'intérieur de laquelle le client ne subit ni pénalité ni règlement au prix du marché. | complétude, domaine, ordre de grandeur, convention d'unité | **0 nul**, tout contrat porte une tolérance ; **aucune valeur négative ni nulle** ; valeurs **entre 10 et 20** ; convention **[0 ; 100]** et non [0 ; 1] | | | |
+| `commodity` | Indique l'énergie sur laquelle porte le contrat. | domaine de valeurs, complétude | domaine exactement **{GAS, POWER}**, le dictionnaire du README ne mentionnant que ces deux énergies | | | |
+| `pricing_type` | Indique le mode de fixation du prix de l'énergie sur la durée du contrat. | domaine de valeurs, complétude | **2 modalités**, un prix fixé à la signature et un prix indexé sur un indice de marché | | | |
 
----
+Ce qui est déjà acquis par le Niveau 0 et n'a pas à être retesté : `contract_id` est unique et non nul,
+`customer_id` compte 146 valeurs distinctes sans orphelin, et aucune des deux dates n'est nulle,
+puisque les trois filtres temporels totalisent exactement 260 lignes.
+
 ---
 
 # Niveau 2 - relations entre tables
