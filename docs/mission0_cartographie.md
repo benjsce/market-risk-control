@@ -3,6 +3,142 @@
 Profiling systématique et reconstitution du modèle relationnel.
 Date de référence du TP : **24 juillet 2026**. Année de livraison sous suivi : **2026**.
 
+---
+
+# Récapitulatif
+
+Synthèse de ce qui est établi, de ce qui ne l'est pas, et de ce qui conditionne la suite.
+
+## Volumétries, clés et mailles
+
+| Table | Lignes | Clé primaire réelle | Maille | Historisation |
+|---|---|---|---|---|
+| `ref_customer` | 220 | `customer_id` | un client | non, état courant |
+| `ref_site` | 1 400 | `site_id` | un point de livraison, rattaché à une seule commodité | non, état courant |
+| `ref_contract` | 260 | `contract_id` | un contrat | oui, les contrats successifs coexistent |
+
+`customer_name` est également unique et non nulle sur `ref_customer`, donc clé candidate.
+`ref_contract` ne contient aucun contrat futur : tous ont déjà pris effet au 24 juillet 2026.
+
+## Colonnes utilisables et colonnes à écarter
+
+| Colonne | État | Conséquence |
+|---|---|---|
+| `customer_id`, `site_id`, `contract_id` | **fiables** | clés de jointure sûres, uniques, non nulles, sans orphelin |
+| `commodity` | **fiable** des deux côtés | domaine `{GAS, POWER}`, 521 sites gaz sur 1 400, 93 contrats gaz sur 260 |
+| `contracted_capacity_kw` | **fiable** | seule grandeur numérique du référentiel, sert de taille de référence par site |
+| `sector`, `segment` | fiables, indépendantes entre elles | 7 et 4 modalités, aucune nulle |
+| `credit_rating` | fiable, **mais** l'absence de notation est codée `NR` et non `NULL` | 31 clients sur 220 non notés ; exclure `NR` explicitement de toute statistique conditionnée |
+| `start_date`, `end_date` | fiables | format `AAAA-MM-JJ`, aucune inversion, durées de 1 à 3 ans |
+| `pricing_type` | fiable | 4 modalités : `FIXED` 115, `INDEXED` 59, `CLICK` 54, `SPOT_PASSTHROUGH` 32 |
+| `volume_tolerance_pct` | fiable | barème à 4 paliers, 5 / 10 / 15 / 20, convention [0 ; 100] |
+| **`dso`, `monitored`, `profile_type`** | **inexploitables** | affectation aléatoire, voir famille n° 1. Ne jamais joindre, filtrer ni regrouper dessus |
+
+## Anomalies retenues : 2 familles sur les 4 annoncées
+
+**Famille 1, `ref_site`.** Les trois attributs descriptifs `dso`, `monitored` et `profile_type` sont
+statistiquement indépendants de tout ce qui devrait les déterminer. Volet réfutable ligne à ligne :
+267 sites, soit 19,1 % du référentiel et 1 125 523 kW (21,5 % de la puissance), portent une
+contradiction physique entre `dso` et `commodity`. Les deux autres colonnes ne se chiffrent pas ligne
+à ligne, leur distribution entière étant vide de sens.
+
+**Famille 2, `ref_contract`.** Couverture en double : 35 couples `(client, commodité)` portent deux ou
+trois contrats en vigueur simultanément au 24 juillet 2026, soit 41 contrats en excès, 24,0 % des
+couples actifs. Non chiffrable en MWh depuis `ref_contract`, qui ne porte aucun volume.
+
+**Candidat non tranché.** 8 couples `(client, commodité)` portent un contrat en vigueur alors que le
+client ne possède aucun site dans cette commodité.
+
+## Modèle relationnel
+
+| Paire | Clé de jointure | Cardinalité | Orphelins |
+|---|---|---|---|
+| `ref_site` → `ref_customer` | `customer_id` | un à plusieurs | 0 des deux côtés |
+| `ref_contract` → `ref_customer` | `customer_id` | un à plusieurs | 0 côté contrats, **74 clients** sans contrat |
+| `ref_site` ↔ `ref_contract` | `(customer_id, commodity)` + contrat en vigueur | plusieurs à plusieurs | **899 sites** sans contrat, **8 couples** contrat sans site |
+
+Le lien site vers contrat n'existe pas dans le schéma. Il se reconstruit sur le couple
+`(customer_id, commodity)` filtré sur `start_date <= '2026-07-24' and end_date >= '2026-07-24'`, seules
+colonnes communes aux deux tables. La jointure interne rend 648 lignes, l'externe 1 547, pour 1 400
+sites en entrée.
+
+**899 sites sur 1 400** relèvent d'un contrat inexistant ou expiré, soit 64,2 % du référentiel et
+3 402 619 kW, 64,91 % de la puissance souscrite. Le verdict entre anomalie et réalité métier n'est pas
+rendu.
+
+## Ce qui n'a pas été traité
+
+| Source | État | Renvoyé à |
+|---|---|---|
+| `trd_deal` | non cadrée | Mission 1 |
+| `pos_snapshot` | non ouverte | Mission 2 |
+| `mkt_forward_curve` | non ouverte | Mission 3 |
+| `mkt_spot_hourly` | non ouverte | Mission 5 |
+| `volumes_hourly` | non ouverte | Mission 4 |
+| `actuals_daily` | non ouverte | Mission 5 |
+| `bo_confirmations_20260724.csv` | non ouvert | Mission 1 |
+
+Deux questions à trancher de la Mission 0 restent ouvertes : la clé primaire réelle de `trd_deal`, et
+le verdict sur les 899 sites sans contrat.
+
+---
+
+# Feuille de route pour la Mission 1
+
+## Point d'entrée : la clé primaire de `trd_deal`
+
+C'est la première question à trancher de la Mission 0 et la première dépendance de la Mission 1, dont
+l'énoncé prévient qu'« une jointure naïve sur `deal_id` produit plus de lignes qu'il n'y a de deals ».
+
+Éléments connus, issus de l'exploration initiale et **non opposables** au titre du protocole :
+
+- 9 580 lignes pour **9 000 `deal_id` distincts** ;
+- 575 `deal_id` apparaissant 2 fois, 5 apparaissant 3 fois ;
+- **40 lignes strictement identiques** sur l'ensemble des colonnes ;
+- colonne `version` à valeurs `1` et `2` ;
+- colonne `status` comportant au moins `CANCELLED` et `PENDING` ;
+- 12 contreparties, 5 books dont `B2B_FR_GAS_HEDGE` et `B2B_FR_STRUCT` ;
+- `trade_date` du 2025-06-02 au 2026-07-24, mais `trade_ts` allant jusqu'au **2026-07-25 13:16:03**,
+  donc au moins un deal dont l'horodatage dépasse sa propre date de transaction et la date de
+  référence du TP ;
+- livraisons du 2026-01-01 au 2027-12-01 en début, jusqu'au 2028-11-30 en fin.
+
+Ces chiffres sont à reprendre sous protocole : promesse écrite, prédiction, puis mesure.
+
+## Ce que la Mission 0 apporte à la Mission 1
+
+**Le book `B2B_FR_STRUCT` a un sens.** 54 contrats sont en `pricing_type = CLICK`, produit structuré
+où le client fige son prix par tranches successives. La couverture correspondante se construit
+progressivement et non à la signature.
+
+**Le taux de couverture attendu dépend de `pricing_type`.** 32 contrats en `SPOT_PASSTHROUGH`
+n'appellent quasiment aucune couverture, 115 en `FIXED` en appellent une intégrale dès la signature.
+Toute comparaison entre position couverte et volume client doit segmenter sur cette colonne.
+
+**Les contreparties du fichier back office ne suivront pas les codes du front.** Le rapprochement se
+fera par une fonction de normalisation. L'échelle construite sur `customer_name` en Mission 0 n'a
+fusionné aucune ligne, faute de matière : casse, espaces, points, accents. Elle n'est donc pas validée,
+seulement écrite. Elle sera réellement éprouvée sur l'extrait back office.
+
+**`merge(..., indicator=True)` est l'outil de la réconciliation.** Il produit une partition exclusive
+et exhaustive en `both`, `left_only`, `right_only` sans reposer sur aucune hypothèse de nullité,
+contrairement à l'anti-jointure par test de nul. C'est exactement ce que l'énoncé de la Mission 1
+demande : « classer chaque transaction dans une catégorie d'écart exclusive et exhaustive ».
+
+**Le format de date `AAAA-MM-JJ` du référentiel se trie correctement en ordre lexicographique.** Ce ne
+sera pas le cas de l'extrait back office, dont l'énoncé annonce que quatre caractéristiques de format
+s'opposent à une lecture par défaut.
+
+## Méthode reconduite
+
+- Une promesse en français, une prédiction chiffrée, puis la mesure. Un commit pour les prédictions,
+  un commit pour les résultats.
+- Tout écart chiffré en nombre de lignes **puis** dans une unité métier, MWh ou euros.
+- Toute décision accompagnée de l'alternative écartée.
+- Un agrégat qui tombe juste se décompose à la maille inférieure avant d'être accepté.
+
+---
+
 ## Protocole
 
 Ce découpage en quatre niveaux est une **méthode de travail personnelle**, pas une exigence du sujet.
