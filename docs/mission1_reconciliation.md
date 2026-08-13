@@ -244,7 +244,210 @@ version, un doublon de saisie est une anomalie à remonter au back office.
 
 **Résultat et écart** :
 
-> à remplir après exécution
+Mesures dans `notebooks/mission1_reconciliation.ipynb`.
+
+### A. Domaine et répartition de `status`
+
+**Domaine confirmé** : trois modalités, `CONFIRMED`, `PENDING`, `CANCELLED`. Aucune autre.
+
+La structure des `deal_id` est également confirmée : 8 425 occupent une ligne, 570 en occupent deux,
+5 en occupent trois, soit 9 000 `deal_id` pour 9 580 lignes.
+
+| | Prédit lignes | **Réel lignes** | Prédit dernières versions | **Réel dernières versions** |
+|---|---|---|---|---|
+| `CONFIRMED` | 90 % | **92,67 %** | 93 % | **92,63 %** |
+| `PENDING` | 7 % | **4,29 %** | 3,8 % | **4,28 %** |
+| `CANCELLED` | 3 % | **3,04 %** | 3,2 % | **3,09 %** |
+
+Écarts relatifs de chaque prédiction à la population qui la concerne : 2,97 %, 38,7 % et 1,25 % pour la
+première ; 0,39 %, 12,6 % et 3,47 % pour la seconde.
+
+### `status` est indépendant de `version` : il n'existe pas de machine à états
+
+Les deux répartitions **observées** sont identiques : 92,67 / 4,29 / 3,04 contre 92,63 / 4,28 / 3,09.
+
+La prédiction sur les dernières versions reposait sur l'idée que `PENDING` est un état transitoire,
+donc appelé à disparaître des dernières versions, et `CANCELLED` un état terminal, donc sur-représenté.
+**Ce raisonnement est réfuté.** Un deal ne passe pas de `PENDING` à `CONFIRMED` : le statut est
+attribué ligne par ligne, sans lien avec la position dans la séquence des versions.
+
+Même signature que les colonnes aléatoires de `ref_site` en Mission 0 : une colonne indépendante de ce
+qui devrait la déterminer.
+
+La seconde prédiction est plus proche du réel que la première, mais pour une raison qui ne tient pas :
+la première surestimait `PENDING` à 7 % alors qu'il vaut 4,3 % dans les deux populations, et
+l'ajustement a corrigé ce chiffre à la baisse par un mécanisme inexistant.
+
+### Décomposition des 580 lignes remplacées
+
+| Statut | Lignes | Dernières versions | Remplacées |
+|---|---|---|---|
+| `CONFIRMED` | 8 878 | 8 337 | **541** |
+| `PENDING` | 411 | 385 | **26** |
+| `CANCELLED` | 291 | 278 | **13** |
+| **Total** | 9 580 | 9 000 | **580** |
+
+Les lignes remplacées se répartissent à 93,3 / 4,5 / 2,2, soit sensiblement la répartition globale.
+Une ligne remplacée a donc le même statut qu'une ligne quelconque, ce qui confirme l'indépendance
+entre `status` et `version`.
+
+### Candidat d'écart : 13 deals amendés après annulation
+
+La dernière ligne du tableau contient une impossibilité métier. **13 lignes `CANCELLED` ne sont pas la
+dernière version de leur deal** : une version leur succède.
+
+Une annulation défait la transaction. Rien ne vient après. Ces 13 cas sont un écart franc, chiffrable,
+et relèvent d'une remontée au back office.
+
+À rapprocher des treize familles d'écarts annoncées, sans conclure avant d'avoir vérifié le statut de
+la version qui succède à l'annulation : une réactivation explicite ne serait pas la même chose qu'un
+amendement aveugle.
+
+### Seuil absolu et seuil relatif ne classent pas les mêmes lignes
+
+La quatrième question à trancher du sujet demande de montrer que ces deux seuils ne sélectionnent pas
+les mêmes lignes. La mesure ci-dessus en fournit une démonstration issue des données elles-mêmes.
+
+Écarts de la seconde prédiction à la réalité :
+
+| Statut | Écart absolu | Écart relatif |
+|---|---|---|
+| `CONFIRMED` | 0,37 point | **0,39 %** |
+| `PENDING` | 0,48 point | 12,6 % |
+| `CANCELLED` | **0,11 point** | 3,47 % |
+
+Classement en absolu : `CANCELLED`, `CONFIRMED`, `PENDING`.
+Classement en relatif : `CONFIRMED`, `CANCELLED`, `PENDING`.
+
+Les deux premiers rangs s'inversent. La cause est mécanique : un écart relatif rapporté à une base
+faible, ici 3,2 %, est amplifié. Un seuil absolu protège les petites bases, un seuil relatif les
+pénalise. La même fonction et le même raisonnement seront repris sur les écarts de prix.
+
+### B. Deals en vigueur
+
+| Mesure | Prédiction | Résultat | Écart |
+|---|---|---|---|
+| Lignes après sélection de la version maximale | 9 000 | **9 000**, pour 9 000 `deal_id` distincts | **0** |
+| Deals en vigueur, dernière version confirmée | 8 370 | **8 337** | **-33**, soit -0,39 % |
+
+La règle de sélection rend exactement un état par `deal_id`. L'écart sur le nombre de deals en vigueur
+provient entièrement de la part de `CONFIRMED` prédite à 93 % contre 92,63 % réels ; le mécanisme de
+sélection était juste.
+
+**Réserve sur le déterminisme.** La sélection s'appuie sur `sort_values` puis `drop_duplicates`, ce qui
+départage arbitrairement les ex aequo. Elle rend le bon nombre de lignes, mais le choix reste
+indéterminé lorsque deux lignes partagent la version maximale. Les cas concernés sont identifiés
+ci-dessous et sont sans conséquence ici, les lignes en concurrence étant identiques.
+
+### C. Amendements contre doublons de saisie
+
+| Mesure | Prédiction | Résultat | Écart |
+|---|---|---|---|
+| Lignes strictement dupliquées | au plus 40 | **40** | conforme |
+| `deal_id` portant un doublon strict | au plus 40 | **40** | conforme |
+| `deal_id` relevant d'un amendement | au moins 535 | **540** | conforme |
+
+Les 40 lignes en excès appartiennent à 40 `deal_id` distincts, soit un excès chacun.
+
+**Les deux familles ne sont pas exclusives à la maille `deal_id`.** Les 5 `deal_id` à trois lignes
+portent simultanément un amendement et une copie. Décomposition complète des 575 `deal_id`
+multi-lignes :
+
+| Composition | `deal_id` | Mécanisme |
+|---|---|---|
+| 2 lignes différentes | **535** | amendement pur |
+| 2 lignes identiques | **35** | doublon strict pur |
+| 3 lignes : original, amendement, copie | **5** | les deux à la fois |
+| | **575** | |
+
+Ce recouvrement devra être tranché avant de construire la classification des écarts, que le sujet
+exige exclusive : soit une troisième catégorie pour les cas mixtes, soit une classification à la maille
+ligne plutôt qu'à la maille `deal_id`. Classer par ligne et classer par deal ne donnent ni les mêmes
+catégories ni les mêmes totaux.
+
+**Ce que modifie un amendement.** Sur `D2600313`, le volume passe de 177,2 à 185,7 MWh et le prix de
+70,160 à 68,693 EUR/MWh. Un amendement change le volume **et** le prix. Une agrégation sans sélection
+de version compterait donc deux volumes différents pour une même transaction.
+
+### `trade_ts` est fabriqué sur les lignes amendées
+
+Observation initiale sur les 5 triplets : l'horodatage de l'amendement vaut celui de l'original **plus
+exactement un jour**, à la seconde près, l'heure de la journée étant préservée.
+
+| `deal_id` | Original | Amendement |
+|---|---|---|
+| D2600313 | 2025-06-05 08:43:30 | 2025-06-06 08:43:30 |
+| D2601497 | 2025-09-24 11:53:37 | 2025-09-25 11:53:37 |
+| D2601680 | 2025-09-22 14:33:01 | 2025-09-23 14:33:01 |
+| D2601976 | 2025-07-08 17:34:22 | 2025-07-09 17:34:22 |
+| D2608057 | 2025-08-13 14:31:18 | 2025-08-14 14:31:18 |
+
+Généralisation sur les 575 `deal_id` multi-lignes, écart en jours entre premier et dernier horodatage :
+
+| Écart | `deal_id` | Prédit |
+|---|---|---|
+| 1,0 jour | **540** | 540 |
+| 0,0 jour | **35** | 35 |
+
+Aucune autre valeur. Prédiction confirmée à l'unité près.
+
+**Le décalage est mécanique, pas naturel.** Dans un système de trading réel, un amendement survient
+quelques minutes après une erreur de saisie, quelques heures après une renégociation, quelques jours
+après une réconciliation : la distribution des écarts serait étalée. Ici 540 sur 540 valent exactement
+1,0 jour et conservent l'heure de l'original à la seconde.
+
+L'hypothèse concurrente, un traitement de nuit horodatant tous les amendements au passage du batch, est
+réfutée par les données : l'heure serait alors identique pour tous les deals, or elle varie et suit
+celle de l'original.
+
+Conclusion : sur une ligne amendée, `trade_ts` n'est pas l'horodatage de l'amendement, c'est celui de
+l'original augmenté de 24 heures.
+
+**Conséquence opératoire.** `trade_ts` ne peut servir ni à dater un amendement, ni à ordonner les
+versions. C'est important : `MAX(trade_ts)` est la deuxième façon évidente de sélectionner l'état
+courant après `MAX(version)`. Elle donnerait ici le bon résultat, mais sur une valeur inventée, et elle
+ne départagerait pas les deux lignes identiques d'un cas mixte.
+
+### Vérification : `trade_ts` incohérent avec `trade_date`
+
+Prédiction dérivée du mécanisme : 535 amendements purs apportant chacun une ligne décalée, plus les
+cas mixtes selon l'emplacement de leur copie, trois sur l'amendement et deux sur l'original, soit
+`535 + 3 × 2 + 2 × 1 = 543` lignes.
+
+**Résultat : 543 lignes.** Prédiction confirmée exactement.
+
+Toutes portent `version = 2`. La correspondance est donc parfaite dans les deux sens : une ligne est de
+version 2 si et seulement si son `trade_ts` est décalé d'un jour par rapport à sa `trade_date`.
+
+### Modèle structurel complet de `trd_deal`
+
+L'ensemble des mesures se referme sans résidu :
+
+| Population | `deal_id` | Lignes |
+|---|---|---|
+| Deals à ligne unique | 8 425 | 8 425 |
+| Deals amendés, deux lignes différentes | 535 | 1 070 |
+| Deals avec doublon strict, deux lignes identiques | 35 | 70 |
+| Deals mixtes, trois lignes | 5 | 15 |
+| **Total** | **9 000** | **9 580** |
+
+Réparti par version : 9 037 lignes de version 1 et 543 de version 2. L'excédent de 37 lignes de
+version 1 sur les 9 000 deals correspond aux 35 doublons purs et aux 2 cas mixtes dont la copie porte
+sur l'original. Les 3 lignes de version 2 en excès correspondent aux 3 cas mixtes dont la copie porte
+sur l'amendement. Les 40 doublons se répartissent donc en 37 sur version 1 et 3 sur version 2.
+
+### Candidats d'écarts issus de `trd_deal`
+
+Trois, à confronter aux treize familles annoncées, sans conclure avant la réconciliation :
+
+| # | Candidat | Volume | Nature |
+|---|---|---|---|
+| 1 | Doublons de saisie stricts | 40 lignes, 40 `deal_id` | anomalie à remonter au back office |
+| 2 | `trade_ts` fabriqué sur les lignes de version 2 | 543 lignes | colonne inexploitable pour dater ou ordonner |
+| 3 | Deals amendés après annulation | 13 lignes `CANCELLED` non terminales | impossibilité métier |
+
+Le troisième reste à qualifier : il faut vérifier le statut de la version qui succède à l'annulation.
+Une réactivation explicite ne serait pas la même chose qu'un amendement aveugle.
 
 ## Implications pour toute jointure future
 
