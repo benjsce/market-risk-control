@@ -495,7 +495,139 @@ silencieusement plutôt que de lever une erreur ? »*
 `setup_check.py` affiche l'en-tête du fichier sans le parser. Le lire est légitime, c'est du matériel
 fourni. Écrire les quatre prédictions **avant** d'ouvrir le fichier lui-même.
 
-> à remplir
+### Volumétrie
+
+`data/raw/bo_confirmations_20260724.csv` : 9 011 lignes de texte, soit un en-tête et **9 010
+confirmations**, 13 champs séparés par `;`, aucun champ vide, aucun guillemet, aucun `\r`. À comparer
+aux 9 580 lignes et 9 000 `deal_id` distincts de `trd_deal`.
+
+### Pistes écartées par mesure, avant d'accuser le format
+
+Deux hypothèses ont été testées et réfutées, chacune en une mesure. Elles sont consignées parce
+qu'écarter une piste est un résultat, pas une perte de temps.
+
+**L'encodage.** Un fichier français mal encodé est le suspect réflexe. Lecture du fichier en binaire et
+inventaire des octets hors ASCII :
+
+```python
+with open("data/raw/bo_confirmations_20260724.csv", "rb") as f:
+    octets = f.read()
+
+sorted({b for b in octets if b > 127})
+```
+
+Résultat : liste vide. Aucun octet au-dessus de 127, le fichier est en **ASCII pur**. Or ASCII est le
+sous-ensemble commun de UTF-8, latin-1 et cp1252 : ces trois encodages produisent ici exactement les
+mêmes caractères. L'encodage ne peut pas être en cause, quel que soit le défaut de `read_csv`.
+
+**Les jetons de valeur manquante.** Par défaut pandas convertit en `NaN` une quinzaine de chaînes
+(`NA`, `N/A`, `NULL`, `nan`, `None`, `-`, ...). Un code métier légitime valant l'une d'elles
+disparaîtrait sans bruit.
+
+Prédiction : 0 `NaN` partout, aucune colonne concernée.
+
+`bo.isna().sum()` renvoie 0 sur les 13 colonnes. Prédiction confirmée, piste close.
+
+### Les quatre caractéristiques
+
+Elles ne sont pas des propriétés exotiques du fichier : ce sont exactement les quatre arguments qu'il
+faut passer pour que la lecture soit juste.
+
+```python
+bo = pd.read_csv(chemin, sep=";", decimal=",",
+                 parse_dates=["trade_dt", "del_from", "del_to"], dayfirst=True)
+```
+
+| # | Caractéristique du format | Défaut de `read_csv` | Comment le défaut se manifeste |
+|---|---|---|---|
+| 1 | séparateur `;` | `sep=","` | une colonne unique contenant la ligne entière |
+| 2 | décimale `,` | `decimal="."` | `quantity` et `unit_price` restent en `object` |
+| 3 | les dates sont des chaînes, pandas 2 ne les parse plus seul | `parse_dates=None` | les trois colonnes de date restent en `object` |
+| 4 | ordre jour/mois | `dayfirst=False` | **rien, la colonne sort en `datetime64` propre** |
+
+Les trois premières se voient dans `dtypes`. La quatrième est **celle qui corrompt silencieusement**.
+
+### Mesure de la corruption silencieuse
+
+Le doute était réel : pandas 2 déduit un format unique à partir du premier élément non nul, puis
+l'applique à toute la colonne. Si ce premier élément est non ambigu, l'inférence peut rattraper
+`dayfirst=False` toute seule. Il fallait donc mesurer, pas affirmer.
+
+Relecture sans `dayfirst`, comparaison colonne par colonne :
+
+```python
+bo_us = pd.read_csv(chemin, sep=";", decimal=",",
+                    parse_dates=["trade_dt", "del_from", "del_to"])
+
+for col in ["trade_dt", "del_from", "del_to"]:
+    print(col, (bo_us[col] != bo[col]).sum())
+```
+
+| Colonne | Lignes divergentes | Avertissement pandas |
+|---|---|---|
+| `trade_dt` | 0 | oui |
+| `del_from` | **8 249** | **non** |
+| `del_to` | 0 | oui |
+
+Deux avertissements seulement pour trois colonnes. Le message `Parsing dates in %d/%m/%Y format when
+dayfirst=False (the default) was specified` signale les colonnes où pandas a deviné le format français
+malgré le défaut, donc celles qui vont bien. **L'avertissement se lève là où il n'y a pas de problème
+et se tait sur la colonne fausse.**
+
+**Mécanique.** L'inférence dépend du premier élément de chaque colonne.
+
+- `trade_dt` commence par `23/10/2025`. 23 ne peut pas être un mois, l'ambiguïté est levée, format
+  `%d/%m/%Y` retenu.
+- `del_to` est une fin de période, `30/11/2028`, `31/07/2026` : le jour dépasse 12, même résolution.
+- `del_from` est un début de période, donc toujours le 1er du mois : `01/12/2027`. Le premier nombre
+  vaut 01, strictement ambigu. Pandas retient `%m/%d/%Y` et lit **12 janvier 2027** au lieu du
+  **1er décembre 2027**.
+
+Le modèle se ferme sans résidu :
+
+```python
+len(bo), (bo["del_from"].dt.day == 1).mean(), bo["del_from"].dt.month.value_counts().sort_index()
+```
+
+| Grandeur | Valeur |
+|---|---|
+| Lignes | 9 010 |
+| Part des `del_from` au 1er du mois | **1,0**, sans exception |
+| `del_from` en janvier | **761** |
+| Lignes intactes sous lecture américaine | 9 010 - 8 249 = **761** |
+
+Les seules lignes épargnées sont exactement celles de janvier, où `01/01` est invariant par permutation
+du jour et du mois. Les douze mois sont quasi uniformes, entre 722 et 783 lignes.
+
+### Pourquoi cette corruption est la plus grave possible
+
+La permutation envoie **toutes** les lignes corrompues en janvier de la même année, le jour prenant la
+valeur du vrai mois. Trois contrôles usuels sont aveugles à cette signature :
+
+- le **contrôle de type** ne voit rien, la colonne est un `datetime64` valide ;
+- l'**invariant `del_from <= del_to`** ne voit rien non plus, puisque la date corrompue recule toujours
+  vers janvier et reste donc antérieure à la fin de livraison ;
+- la **comparaison front / back office** sur les autres colonnes ne voit rien, elles sont justes.
+
+Seul un **contrôle de distribution** l'attrape : 100 % des livraisons débutant en janvier est
+impossible pour un portefeuille. C'est la leçon transposable, et elle vaut au-delà de ce fichier. Sur
+une colonne de date, vérifier le type et vérifier l'ordre ne suffit pas à détecter une inversion
+jour/mois ; il faut regarder la forme de la distribution.
+
+L'enjeu est direct : `del_from` porte le début de la période de livraison, c'est-à-dire l'axe
+d'agrégation de la Mission 2. Une position mensuelle construite sur la lecture par défaut serait fausse
+sur 91,6 % des lignes sans qu'aucun contrôle de type ne bronche.
+
+### Observations de format à reprendre dans les questions suivantes
+
+Relevées à la lecture de `bo.head()`, sans mesure à ce stade, donc à confirmer là où elles servent.
+
+| Champ back office | Champ `trd_deal` | Écart apparent |
+|---|---|---|
+| `cpty_code` : `TOTALE`, `EEX_CL`, `STATKR`, `VITOL` | `counterparty` : `TOTALENERGIES`, `EEX_CLEARED`, `STATKRAFT`, `VITOL` | troncature à 6 caractères, à confirmer, et injectivité à démontrer - question 7 |
+| `buy_sell` : `B`, `S` | `direction` : `BUY`, `SELL` | codage abrégé - question 6 |
+| `product` : `PWR_FR`, `NG_PEG` | `commodity` : `POWER`, `GAS` | commodité et place de cotation fusionnées |
+| `deal_ref` : `D2605829` | `deal_id` : `D2605829` | même forme apparente sur les 5 premières lignes - question 2 |
 
 ## 2. Clé de réconciliation et fonction de normalisation
 
