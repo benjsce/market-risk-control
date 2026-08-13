@@ -291,6 +291,11 @@ Les lignes remplacées se répartissent à 93,3 / 4,5 / 2,2, soit sensiblement l
 Une ligne remplacée a donc le même statut qu'une ligne quelconque, ce qui confirme l'indépendance
 entre `status` et `version`.
 
+**Effectifs dérivés.** Seuls les 9 580, 9 000 et 8 337 sont mesurés. Les neuf autres nombres de ce
+tableau sont reconstitués à partir de proportions arrondies à six décimales, et les colonnes
+« Remplacées » en sont des différences. Le 13, qui fonde un candidat d'anomalie, est donc une
+différence entre deux valeurs approchées et doit être compté directement avant toute remontée.
+
 ### Candidat d'écart : 13 deals amendés après annulation
 
 La dernière ligne du tableau contient une impossibilité métier. **13 lignes `CANCELLED` ne sont pas la
@@ -353,12 +358,20 @@ Les 40 lignes en excès appartiennent à 40 `deal_id` distincts, soit un excès 
 portent simultanément un amendement et une copie. Décomposition complète des 575 `deal_id`
 multi-lignes :
 
-| Composition | `deal_id` | Mécanisme |
-|---|---|---|
-| 2 lignes différentes | **535** | amendement pur |
-| 2 lignes identiques | **35** | doublon strict pur |
-| 3 lignes : original, amendement, copie | **5** | les deux à la fois |
-| | **575** | |
+| Composition | `deal_id` | Mécanisme | Statut du chiffre |
+|---|---|---|---|
+| 2 lignes différentes | 535 | amendement pur | **dérivé** |
+| 2 lignes identiques | 35 | doublon strict pur | **dérivé** |
+| 3 lignes : original, amendement, copie | **5** | les deux à la fois | mesuré |
+| | **575** | | mesuré |
+
+**Les 535 et 35 sont dérivés, non mesurés.** Ils reposent sur l'hypothèse que les 5 `deal_id` à trois
+lignes portent chacun exactement un doublon, ce qui ramènerait les doublons purs à 40 - 5 = 35 et les
+amendements purs à 570 - 35 = 535. Cette hypothèse vient de l'observation que, dans chaque triplet,
+deux lignes partagent le même `trade_ts` ; l'égalité des horodatages n'implique pas l'identité stricte
+des lignes, qui n'a pas été vérifiée.
+
+Mesure permettant de trancher : `df[df.duplicated(keep='first')]["version"].value_counts()`.
 
 Ce recouvrement devra être tranché avant de construire la classification des écarts, que le sujet
 exige exclusive : soit une troisième catégorie pour les cas mixtes, soit une classification à la maille
@@ -431,20 +444,33 @@ L'ensemble des mesures se referme sans résidu :
 | Deals mixtes, trois lignes | 5 | 15 |
 | **Total** | **9 000** | **9 580** |
 
-Réparti par version : 9 037 lignes de version 1 et 543 de version 2. L'excédent de 37 lignes de
-version 1 sur les 9 000 deals correspond aux 35 doublons purs et aux 2 cas mixtes dont la copie porte
-sur l'original. Les 3 lignes de version 2 en excès correspondent aux 3 cas mixtes dont la copie porte
-sur l'amendement. Les 40 doublons se répartissent donc en 37 sur version 1 et 3 sur version 2.
+**Répartition par version : dérivée, non mesurée.** 9 037 lignes de version 1 et 543 de version 2,
+l'excédent de 37 sur les 9 000 deals correspondant aux 35 doublons purs et aux 2 cas mixtes dont la
+copie porterait sur l'original, et les 3 lignes de version 2 en excès aux 3 cas mixtes dont la copie
+porterait sur l'amendement. Les 40 doublons se répartiraient ainsi en 37 sur version 1 et 3 sur
+version 2.
+
+Aucun de ces cinq nombres n'a été compté. Le 543 lui-même est déduit de l'affichage des lignes à date
+décalée, où toutes portaient `version = 2`, sans que le comptage ait été fait dans les deux sens.
+
+Trois mesures les fixeraient : `df["version"].value_counts()`,
+`df[df.duplicated(keep='first')]["version"].value_counts()`, et les effectifs de `status` comptés
+directement plutôt que reconstitués à partir de proportions arrondies, ce dernier point valant aussi
+pour les 541, 26 et 13 lignes remplacées.
+
+Ce marquage est délibéré : un nombre qui boucle arithmétiquement n'est pas un nombre mesuré, et le
+projet en a déjà rencontré plusieurs cas où deux erreurs de sens opposé se compensaient dans un total
+juste.
 
 ### Candidats d'écarts issus de `trd_deal`
 
 Trois, à confronter aux treize familles annoncées, sans conclure avant la réconciliation :
 
-| # | Candidat | Volume | Nature |
-|---|---|---|---|
-| 1 | Doublons de saisie stricts | 40 lignes, 40 `deal_id` | anomalie à remonter au back office |
-| 2 | `trade_ts` fabriqué sur les lignes de version 2 | 543 lignes | colonne inexploitable pour dater ou ordonner |
-| 3 | Deals amendés après annulation | 13 lignes `CANCELLED` non terminales | impossibilité métier |
+| # | Candidat | Volume | Statut du chiffre | Nature |
+|---|---|---|---|---|
+| 1 | Doublons de saisie stricts | 40 lignes, 40 `deal_id` | **mesuré** | anomalie à remonter au back office |
+| 2 | `trade_ts` fabriqué sur les lignes amendées | 543 lignes | **mesuré** | colonne inexploitable pour dater ou ordonner |
+| 3 | Deals amendés après annulation | 13 lignes `CANCELLED` non terminales | **dérivé** | impossibilité métier |
 
 Le troisième reste à qualifier : il faut vérifier le statut de la version qui succède à l'annulation.
 Une réactivation explicite ne serait pas la même chose qu'un amendement aveugle.
