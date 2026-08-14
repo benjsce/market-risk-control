@@ -635,7 +635,205 @@ Relevées à la lecture de `bo.head()`, sans mesure à ce stade, donc à confirm
 mesure combien de faux écarts tu élimines à chaque étape. Si tu ne fais pas cette mesure, tu ne sais
 pas si ta normalisation est trop laxiste. »*
 
-> à remplir
+### Choix de la clé
+
+Le rapprochement se fait sur `bo.deal_ref` contre `trd_deal.deal_id`. Aucune autre paire de colonnes ne
+porte d'identifiant commun : `confirmation_id` est produit par le back office et n'a pas de contrepartie
+au front, et les colonnes de fond, dates, quantités, prix, ne sont pas des identifiants.
+
+Distinguer les deux rôles est nécessaire à la suite. `confirmation_id` est la clé du **document** de
+confirmation, `deal_ref` est une clé **étrangère** pointant vers le deal du front. Rien n'oblige une clé
+étrangère à être unique.
+
+### Cardinalités de départ
+
+| Grandeur | Valeur |
+|---|---|
+| Lignes du back office | 9 010 |
+| `deal_ref` distincts | **8 945** |
+| Lignes en doublon sur `deal_ref` | **65** |
+| `deal_id` distincts, front | 9 000 |
+| Lignes de `trd_deal` | 9 580 |
+
+8 945 + 65 = 9 010. Les deux clés sont non uniques, mais pas du même ordre : 65 lignes en doublon côté
+back office contre 580 lignes remplacées côté front. Le back office n'a donc **pas** recopié la
+structure de versions du front, il émet une confirmation par deal et non par version.
+
+### Rapprochement brut, avant toute normalisation
+
+```python
+deal_ids = set(df["deal_id"])
+refs = set(bo["deal_ref"])
+
+len(refs & deal_ids), len(refs - deal_ids), len(deal_ids - refs)
+```
+
+| Population | Effectif |
+|---|---|
+| Références appariées telles quelles | 8 665 |
+| Orphelines back office, référence sans deal | **280** |
+| Deals du front sans confirmation | **335** |
+
+8 665 + 280 = 8 945. Le compte boucle.
+
+### L'identité qui structure toute la question
+
+Les deux anti-jointures ne sont pas indépendantes. Chaque identifiant d'un côté est soit apparié, soit
+seul, et le paquet des appariés est le même vu des deux côtés :
+
+```
+9 000 = appariés + non confirmés
+8 945 = appariés + orphelines
+```
+
+Par soustraction, le terme commun disparaît :
+
+```
+non confirmés - orphelines = 9 000 - 8 945 = 55
+```
+
+**Conséquences.** Il n'y a qu'un seul nombre libre, pas trois : prédire les orphelines détermine les non
+confirmés. Et surtout, la normalisation sort une référence de chaque côté à la fois, donc **l'écart de 55
+est invariant**. Il ne dépend pas de la qualité de la clé, c'est une propriété de volumétrie.
+
+**55 est donc le plancher des deals du front sans confirmation.** Même si toutes les orphelines
+s'expliquaient, il resterait 55 deals que le fichier back office ne contient tout simplement pas.
+
+### Caractérisation de la saleté avant d'écrire la fonction
+
+Écrire une normalisation sans avoir vu la saleté, c'est risquer d'être trop laxiste. Recensement des 280
+orphelines par longueur, la forme canonique du front étant `D` suivi de 7 chiffres, soit 8 caractères :
+
+| Longueur | Effectif | Canoniques `^D\d{7}$` |
+|---|---|---|
+| 8 | 155 | 95 |
+| 9 | 125 | 0 |
+
+**Piège d'échantillonnage écarté.** Un premier coup d'oeil par `sorted(refs - deal_ids)[:20]` ne montre
+que des espaces en tête. C'est un artefact : l'espace vaut 32 en ASCII, `D` vaut 68, `d` vaut 100, donc
+toute chaîne commençant par un blanc se range avant toutes les autres. Ce n'est pas un échantillon, c'est
+un extremum. Les inspections suivantes utilisent `sample` ou la population entière.
+
+### La fonction de normalisation
+
+Trois barreaux, appliqués dans cet ordre, et seulement du côté back office.
+
+```python
+norm = (serie.str.strip()
+             .str.upper()
+             .str.replace(r"^D0+", "D", regex=True))
+```
+
+| Barreau | Corrige | Nature du défaut |
+|---|---|---|
+| `strip` | blancs en bord de chaîne | négligence de saisie |
+| `upper` | `d` minuscule | négligence de saisie |
+| `^D0+` | zéro de remplissage, `D02605532` pour `D2605532` | choix de format, partie numérique calée sur 8 chiffres |
+
+Le troisième est d'une autre nature : il **supprime** de l'information au lieu de l'uniformiser. Il tient
+parce que les 9 000 `deal_id` du front sont tous `D` suivi de 7 chiffres et qu'aucun ne commence par
+`D0` : retirer un zéro en tête ne peut créer aucune collision avec une référence valide. L'ancre `^` est
+ce qui rend l'opération sûre, sans elle le motif frapperait n'importe où dans la chaîne.
+
+### Gain mesuré à chaque barreau
+
+La distinction est essentielle : `str.match` teste la **forme**, `isin(deal_ids)` teste l'**existence**.
+Les deux ne coïncident pas, et c'est le second qui compte.
+
+```python
+print("existent brut        :", orph.isin(deal_ids).sum())
+print("existent apres strip :", orph.str.strip().isin(deal_ids).sum())
+print("existent + upper     :", orph.str.strip().str.upper().isin(deal_ids).sum())
+print("existent + D0        :", orph.str.strip().str.upper()
+                                    .str.replace(r"^D0+", "D", regex=True).isin(deal_ids).sum())
+```
+
+| Barreau | Forme canonique | Existent au front | Gain réel |
+|---|---|---|---|
+| brut | 95 | 0 | - |
+| `strip` | 175 | 80 | **+80** |
+| `upper` | 235 | 140 | **+60** |
+| `^D0+` | 280 | 185 | **+45** |
+
+Les huit valeurs des deux colonnes sont **mesurées**. Une première version de ce tableau ne mesurait
+que 140 et 185 et reportait le 80 depuis la colonne de forme. Le raisonnement qui le justifiait était
+correct : après `strip` et `upper`, 235 canoniques pour 140 existantes laissent 95 canoniques absentes,
+or les 95 canoniques dès le brut sont absentes et saturent ce compte, donc toutes les références
+gagnées par les deux premiers barreaux existent. Mais un nombre qui boucle arithmétiquement n'est pas
+un nombre compté, et la mesure directe l'a donc remplacé.
+
+**À chaque barreau, le gain en existence égale exactement le gain en forme.** Aucun barreau n'est
+inutile, et aucun ne fabrique de faux appariement. Les 280 sont toutes canoniques après le troisième
+barreau, il n'existe aucune quatrième forme aberrante.
+
+### Les 95 qui ne se récupèrent jamais
+
+95 références sont **canoniques dès le départ**, longueur 8, `D` suivi de 7 chiffres, aucun caractère
+parasite, et pourtant absentes du front. Il n'y a rien à nettoyer, donc la normalisation ne peut rien
+leur apporter : 235 - 140 = 95, et ce sont les mêmes 95.
+
+Ce n'est pas un défaut de clé, c'est un **écart métier**, et le plus sérieux du lot. Le back office
+détient une confirmation pour une transaction que le front n'a jamais enregistrée. Soit le front a perdu
+un deal, soit le back a confirmé quelque chose qui n'a pas été traité.
+
+### Le front est propre : la saleté est unilatérale
+
+Contrôle indispensable, et il manquait à une première version de cette analyse. `isin(deal_ids)` compare
+la référence normalisée à un référentiel **brut**. Si `deal_id` était sale, une orpheline canonique
+pourrait correspondre à un `deal_id` valant `" D2600031"`, et les 95 seraient un artefact.
+
+```python
+dids = pd.Series(sorted(deal_ids))
+dids.str.len().value_counts(), dids.str.match(r"^D\d{7}$").sum()
+```
+
+Résultat : 9 000 identifiants, **tous de longueur 8, tous canoniques**, sans exception. La réserve est
+levée, les 95 et les 185 tiennent.
+
+Enseignement à retenir : **toute la dégradation est du côté de l'extrait back office.** Il ne s'agit pas
+d'une divergence de conventions entre deux systèmes qui auraient chacun leur norme, mais d'une altération
+à la production du fichier. Normaliser un seul côté d'une comparaison symétrique est une faute, et elle
+n'est rattrapée ici que parce que l'autre côté s'est révélé propre.
+
+### Contrôle de laxisme
+
+Le sujet demande explicitement de savoir si la normalisation est trop laxiste. La définition opératoire :
+elle l'est si elle **fusionne deux références qui étaient distinctes**.
+
+```python
+r = pd.Series(list(refs))
+r.nunique(), r.str.strip().str.upper().str.replace(r"^D0+", "D", regex=True).nunique()
+```
+
+Résultat : `(8945, 8945)`. Aucune fusion, le cardinal est conservé.
+
+**Attention à ne pas prendre une tautologie pour un contrôle.** Vérifier que `150 - 95 = 55` après
+normalisation ne teste rien : les deux nombres ont été obtenus en retranchant 185 à 335 et à 280, leur
+différence vaut donc nécessairement 335 - 280. Seule la mesure de `nunique` ci-dessus est un vrai
+contrôle.
+
+### État final de la clé
+
+| Population | Brut | Normalisé |
+|---|---|---|
+| Références appariées | 8 665 | **8 850** |
+| Orphelines back office | 280 | **95** |
+| Deals du front sans confirmation | 335 | **150** |
+
+185 faux écarts éliminés sur 280, soit 66,1 %. Le tiers restant n'est pas un problème de format.
+
+### Ce que cette question lègue aux suivantes
+
+- **95 confirmations sans deal**, irréductibles. Candidat de famille d'écart.
+- **150 deals sans confirmation**, dont **55 d'excédent structurel** que rien ne pourra expliquer par la
+  clé.
+- **Hypothèse à tester** : les 95 orphelines et 95 des 150 non confirmés sont-ils les mêmes transactions,
+  avec un identifiant corrompu au-delà de ce que la normalisation répare ? Le test ne passe pas par la
+  clé mais par les autres colonnes, date, quantité, prix, contrepartie. Cinq colonnes concordantes
+  valent identification.
+- **65 lignes en doublon** sur `deal_ref` face à 580 lignes remplacées sur `deal_id` : les deux clés sont
+  non uniques, une jointure naïve fait donc exploser le nombre de lignes. Matériau direct de la
+  question 3.
 
 ## 3. Mécanique de l'explosion de jointure
 
