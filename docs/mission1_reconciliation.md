@@ -842,7 +842,149 @@ exacte, puis dis-moi quel indicateur de reporting cette erreur gonfle, et de com
 
 Dépend directement de la clé primaire réelle établie plus haut.
 
-> à remplir
+### Le fait brut
+
+```python
+jointure_naive = bo.merge(fo, left_on="deal_key", right_on="deal_id", how="inner")
+len(jointure_naive)
+```
+
+**9 495 lignes** pour **8 850** deals appariés, soit **645 lignes en trop**.
+
+La référence est 8 850 et non 9 010 ou 9 580 : la réconciliation compare des transactions, donc un deal
+apparié doit produire exactement une ligne de comparaison, celle qui met face à face l'état du front et
+la confirmation du back office. Cette référence découle de la sélection de version déjà tranchée : une
+seule version fait foi.
+
+### La mécanique
+
+Une jointure n'apparie pas une ligne avec une ligne. Elle apparie **toutes les combinaisons** partageant
+la clé. Pour une clé `k`, elle produit donc `n_bo(k) × n_fo(k)` lignes.
+
+| Cas | Lignes produites | En trop |
+|---|---|---|
+| 1 confirmation, 1 version | 1 | 0 |
+| 1 confirmation, 2 versions | 2 | 1 |
+| 2 confirmations, 1 version | 2 | 1 |
+| 2 confirmations, 2 versions | **4** | **3** |
+
+**Un doublon d'un seul côté suffit.** Il n'est pas nécessaire que les deux systèmes soient dégradés
+simultanément pour qu'une transaction soit comptée deux fois.
+
+Démonstration sur les données, sans passer par la jointure :
+
+```python
+n_fo = fo["deal_id"].value_counts()
+n_bo = bo["deal_key"].value_counts()
+
+produit = n_bo.mul(n_fo, fill_value=0)
+produit.sum(), len(jointure_naive)
+```
+
+Résultat : **9 495,0 contre 9 495**. La formule `Σ n_bo(k) × n_fo(k)` est vérifiée, pas seulement
+énoncée.
+
+`mul` aligne les deux Series **par leur index**, ici l'identifiant, et `fill_value=0` annule les clés
+présentes d'un seul côté, ce qui reproduit exactement une jointure interne. L'index du résultat est
+l'union des deux, soit 9 095 étiquettes, dont 245 nulles : les 150 non confirmés et les 95 orphelines.
+
+### Décomposition de l'excédent
+
+Pose `a = n_bo(k) - 1` et `b = n_fo(k) - 1`, les lignes **en trop** de chaque côté. Alors
+
+```
+n_bo × n_fo - 1  =  (a+1)(b+1) - 1  =  a + b + ab
+```
+
+Le `-1` est la ligne légitime, la seule que la réconciliation devrait produire. En quatre blocs :
+
+| Bloc | Effectif | Ce que c'est |
+|---|---|---|
+| `1 × 1` | 1 | la ligne à conserver |
+| `1 × b` | `b` | confirmation légitime contre versions en trop |
+| `a × 1` | `a` | confirmations en trop contre version légitime |
+| `a × b` | `ab` | les deux dégradés en même temps |
+
+**`a × b` seul est une erreur fréquente et fausse.** Il ne compte que le dernier bloc et ignore les deux
+blocs mixtes, où un doublon d'un seul côté suffit à créer une ligne parasite. Sur le cas
+`2 confirmations, 2 versions`, `a × b` vaut 1 là où l'excédent réel vaut 3.
+
+### Attribution mesurée
+
+```python
+cles_appariees = sorted(ids_front & cles_bo)
+
+a = n_bo[n_bo.index.isin(cles_appariees)] - 1
+b = n_fo[n_fo.index.isin(cles_appariees)] - 1
+
+a.sum(), b.sum(), (a * b).sum(), a.sum() + b.sum() + (a * b).sum()
+```
+
+| Cause | Lignes en trop | Part | Responsable |
+|---|---|---|---|
+| Versions multiples au front | **576** | 89,3 % | front office |
+| Doublons de confirmation | **65** | 10,1 % | back office |
+| Les deux à la fois | **4** | 0,6 % | les deux |
+| **Total** | **645** | | |
+
+Le total retombe sur 645, valeur obtenue indépendamment par `9 495 - 8 850`. Ce n'est pas une
+tautologie : si le filtrage avait laissé tomber une clé, la somme n'aurait pas atteint la bonne valeur.
+
+**Le terme croisé est un taux de coïncidence, pas une magnitude.** Sous indépendance, le nombre de clés
+dégradées des deux côtés vaut `65 × 570 / 8 850 = 4,2`. Mesuré : **4**. Les deux dégradations sont donc
+statistiquement indépendantes, le doublonnage du back office et l'amendement au front n'ont aucun lien
+de cause à effet.
+
+Les 4 clés concernées portent toutes `a = 1, b = 1` : `D2601918`, `D2604606`, `D2607974`, `D2608273`.
+Ce sont les cas à examiner un par un lors de la réconciliation ligne à ligne, puisqu'ils demandent de
+trancher deux ambiguïtés à la fois.
+
+### Conclusion opératoire
+
+**89 % du gonflement vient du front, et ce n'est pas une anomalie.** Un deal amendé a légitimement deux
+versions dans `trd_deal`, c'est de l'historisation normale. Le tort n'est pas dans la donnée mais dans
+la jointure qui omet de sélectionner la version en vigueur.
+
+Seules les **65 lignes** du back office relèvent d'un défaut à remonter, et elles pèsent 10 % du
+problème. Les corriger ne réglerait donc presque rien : la correction est à faire côté requête, pas
+côté fichier.
+
+### L'indicateur gonflé, et de combien
+
+C'est le **volume traité**, et le notionnel qui en découle.
+
+```python
+volume_naif = jointure_naive["volume_mwh"].sum()
+
+fo_appariee = fo_derniere_version[fo_derniere_version["deal_id"].isin(cles_bo)]
+volume_correct = fo_appariee["volume_mwh"].sum()
+```
+
+| Grandeur | Jointure naïve | Correct | Écart | Gonflement |
+|---|---|---|---|---|
+| Volume | 2 987 513,8 MWh | 2 790 477,6 MWh | **197 036,2 MWh** | **7,06 %** |
+| Notionnel | 177 141 863,71 EUR | 165 672 694,97 EUR | **11 469 168,74 EUR** | **6,92 %** |
+
+Le taux se rapporte à la **valeur correcte**, convention à annoncer explicitement : rapporté au chiffre
+naïf, le même écart de volume donnerait 6,60 %, et deux personnes calculeraient deux taux différents
+sur les mêmes données.
+
+Le gonflement de 7,06 % est proche du ratio de lignes, `645 / 8 850 = 7,29 %`. L'écart de 0,23 point
+signifie que les deals dupliqués portent un volume environ 3 % inférieur à la moyenne. **Le gonflement
+est donc proportionnel, il ne se concentre pas sur les gros deals.**
+
+**Notionnel n'est pas P&L.** Ces 11,5 M EUR sont un volume multiplié par un prix de transaction, ni une
+perte ni une valorisation de marché. Une erreur de jointure ne fait pas perdre d'argent, elle fait
+publier un chiffre faux.
+
+### Réserve : volume brut contre position nette
+
+Ce qui est sommé ici est un **volume brut**. Additionner `volume_mwh` sans tenir compte de `direction`
+mélange achats et ventes, alors qu'une position nette les compense.
+
+Le taux de gonflement reste valable, puisqu'il compare deux sommes construites de la même façon. Mais
+**2 790 477 MWh n'est pas la position du portefeuille**, c'est le volume traité. La position nette exige
+la convention de signe, question 6, encore ouverte.
 
 ## 4. Seuil de matérialité sur les prix
 
