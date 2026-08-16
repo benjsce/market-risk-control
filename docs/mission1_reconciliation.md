@@ -1013,10 +1013,99 @@ comparaison du sens : c'est un invariant qui doit tenir même quand le sens est 
 *« Les deux systèmes n'utilisent pas les mêmes codes contrepartie. Reconstitue le mapping, et dis-moi
 ce qui te garantit qu'il est injectif. »*
 
-Le front compte 12 contreparties distinctes. C'est ici que l'échelle de normalisation écrite en
-Mission 0 sera éprouvée pour la première fois.
+### Les deux domaines
 
-> à remplir
+```python
+fo["counterparty"].value_counts(), bo["cpty_code"].value_counts()
+```
+
+**12 codes distincts de chaque côté.** Prédiction confirmée, et le raisonnement qui la fondait tient :
+le back office ne confirme que des deals existants, il ne peut donc pas voir de contrepartie inconnue
+du front.
+
+Les effectifs ne concordent pas et n'ont pas à concorder, 9 580 lignes au front contre 9 010 au back
+office. Les rangs sont d'ailleurs différents, `RWE` en tête au front et `VITOL` au back office.
+
+### Le mapping
+
+Troncature aux **6 premiers caractères**, sans exception.
+
+| Front | Back office | | Front | Back office |
+|---|---|---|---|---|
+| `TOTALENERGIES` | `TOTALE` | | `GUNVOR` | `GUNVOR` |
+| `EDF_TRADING` | `EDF_TR` | | `AXPO` | `AXPO` |
+| `STATKRAFT` | `STATKR` | | `RWE` | `RWE` |
+| `SHELL_ENERGY` | `SHELL_` | | `VITOL` | `VITOL` |
+| `MERCURIA` | `MERCUR` | | `UNIPER` | `UNIPER` |
+| `ICE_ENDEX` | `ICE_EN` | | `EEX_CLEARED` | `EEX_CL` |
+
+Les codes de 6 caractères ou moins sont inchangés, ce qui explique que `AXPO`, `RWE`, `VITOL`,
+`UNIPER` et `GUNVOR` soient identiques des deux côtés.
+
+### Le contrôle d'injectivité
+
+```python
+mapping = fo["counterparty"].drop_duplicates().to_frame()
+mapping["code_bo"] = mapping["counterparty"].str[:6]
+
+len(mapping), mapping["code_bo"].nunique(), set(bo["cpty_code"]) - set(mapping["code_bo"])
+```
+
+| Contrôle | Résultat | Ce qu'il teste |
+|---|---|---|
+| Contreparties du front | **12** | nombre d'entrées de la fonction |
+| Codes tronqués distincts | **12** | **injectivité** : conservation du cardinal |
+| Codes back office non couverts | **ensemble vide** | **exhaustivité** : la règle engendre tout l'observé |
+
+Les deux contrôles sont nécessaires et ne se remplacent pas. Le premier vérifie que la fonction ne
+confond rien, le second qu'elle couvre tout. C'est la même mécanique que le contrôle de laxisme de la
+question 2 : **la conservation du cardinal est la définition opératoire de l'injectivité.**
+
+### Ce qui garantit l'injectivité : rien
+
+C'est la vraie réponse à la question posée, et elle est négative.
+
+L'injectivité n'est **pas une propriété de la troncature**, c'est une propriété du domaine observé au
+24 juillet 2026. Elle tient parce qu'aucune des 12 contreparties ne partage ses 6 premiers caractères
+avec une autre, ce qui relève de la chance et non de la construction.
+
+Une entrée future suffit à la détruire. `TOTALENERGIES_GAS` donnerait `TOTALE`, en collision avec
+`TOTALENERGIES`, et les deux contreparties deviendraient indiscernables **dans le sens qui compte**.
+Le sens front vers back office reste calculable, mais le sens inverse, celui dont la réconciliation a
+besoin, perd sa réponse : le fichier affiche `TOTALE` et rien ne permet plus de trancher. La perte est
+définitive, l'information n'est pas dégradée mais détruite.
+
+**À remonter** : un mapping par troncature est une bombe à retardement. Il doit être remplacé par une
+table de correspondance explicite, ou à défaut le contrôle d'injectivité doit être rejoué à chaque
+entrée d'une nouvelle contrepartie en référentiel.
+
+### Vérification sur les données
+
+La table de base de la réconciliation se construit ici, en joignant sur `fo_derniere_version` pour ne
+pas reproduire l'explosion de la question 3.
+
+```python
+rec = bo.merge(fo_derniere_version, left_on="deal_key", right_on="deal_id", how="inner")
+
+rec["cpty_ok"] = rec["cpty_code"] == rec["counterparty"].str[:6]
+len(rec), rec["cpty_ok"].value_counts()
+```
+
+**8 915 lignes, 8 915 concordances, 0 écart.**
+
+Le passage de 9 495 à 8 915 lignes vérifie une fois de plus la formule de la question 3. Dédoublonner
+le front force `b = 0`, donc les deux termes qui contiennent `b` disparaissent :
+
+```
+excedent = a + b + ab  =  65 + 0 + 0  =  65
+9 495 - 576 - 4 = 8 915       et       8 850 + 65 = 8 915
+```
+
+Les 65 confirmations en double subsistent : `drop_duplicates` a nettoyé le front, pas le back office.
+Elles restent une famille d'écart à traiter dans le moteur.
+
+**La question 7 ne livre aucune anomalie**, et c'est un résultat. Un contrôle qui passe intégralement
+élimine une hypothèse et restreint le champ des 13 familles annoncées.
 
 ## 8. Sélection de version
 
@@ -1025,7 +1114,110 @@ agrégation naïve produit si tu ne tranches pas ? »*
 
 Lié à la question de la clé primaire réelle.
 
-> à remplir
+### Laquelle est la bonne
+
+Tranché lors du cadrage de `trd_deal` : **dernière version par `deal_id`, puis filtre
+`status = 'CONFIRMED'`**, soit **8 337** deals en vigueur.
+
+```python
+fo_trie = fo.sort_values(["deal_id", "version"])
+fo_derniere_version = fo_trie.drop_duplicates("deal_id", keep="last")
+fo_en_vigueur = fo_derniere_version[fo_derniere_version["status"] == "CONFIRMED"]
+```
+
+`MAX(trade_ts)` est la seconde façon évidente de sélectionner l'état courant. **Elle est interdite
+ici** : `trade_ts` vaut, sur une ligne amendée, l'horodatage de l'original augmenté d'exactement 24 h.
+Il donnerait le bon résultat, mais sur une valeur inventée, et il ne départagerait pas les deux lignes
+identiques d'un doublon strict.
+
+### Ce que produit une agrégation naïve
+
+```python
+for nom, table in [("toutes les lignes", fo),
+                   ("premiere version", fo_trie.drop_duplicates("deal_id", keep="first")),
+                   ("derniere version", fo_derniere_version),
+                   ("en vigueur", fo_en_vigueur)]:
+    print(f"{nom:20} {len(table):6} lignes   {table['volume_mwh'].sum():14,.1f} MWh")
+```
+
+| Règle | Lignes | Volume MWh |
+|---|---|---|
+| Aucune, toutes les lignes | 9 580 | **3 010 338,7** |
+| Première version | 9 000 | 2 834 460,4 |
+| Dernière version | 9 000 | 2 835 528,3 |
+| **En vigueur** | **8 337** | **2 616 247,1** |
+
+Décomposition de l'erreur, **toutes les parts rapportées au chiffre naïf**, base unique pour qu'elles
+s'additionnent :
+
+| Correction | MWh | Part du naïf |
+|---|---|---|
+| Sélection de version | -174 810,4 | **5,81 %** |
+| Filtre `CONFIRMED` | -219 281,2 | **7,28 %** |
+| **Total** | **-394 091,6** | **13,09 %** |
+
+5,81 + 7,28 = 13,09 exactement. Une décomposition n'est vérifiable que si ses parts partagent une base
+et somment au total ; mélanger les bases interdit au lecteur de contrôler que les causes couvrent tout
+l'écart.
+
+Exprimée au sens usuel de l'erreur relative, écart sur valeur vraie, **l'agrégation naïve surestime la
+position de 15,1 %**, soit `394 091,6 / 2 616 247,1`. Les deux lectures sont la même information : 13,09 %
+du chiffre publié est du vent, ce qui place la vérité 15,1 % plus bas.
+
+**Le résultat contre-intuitif est dans la répartition.** Le filtre de statut coûte plus cher que la
+sélection de version, 219 GWh contre 175 GWh. Quelqu'un qui prendrait `MAX(version)` en se croyant
+rigoureux, sans filtrer le statut, commettrait encore la plus grosse des deux erreurs.
+
+### Ce que change un amendement
+
+```python
+change = paires.groupby("deal_id").nunique()
+change.gt(1).sum().sort_values(ascending=False)
+```
+
+| Colonne | Deals où la valeur varie |
+|---|---|
+| `trade_ts`, `volume_mwh`, `price_eur_mwh`, `version` | **540** |
+| `trade_date`, `commodity`, `direction`, `delivery_start`, `delivery_end`, `counterparty`, `book`, `status` | **0** |
+
+Le 540 referme le modèle structurel par un chemin indépendant : sur 575 `deal_id` multi-lignes, 540
+varient et 35 ne varient sur rien, ce sont exactement les 35 doublons stricts. Et 540 = 535 amendements
+purs + 5 cas mixtes.
+
+**Un amendement change toujours le volume ET le prix, jamais rien d'autre.** Pas une répartition entre
+les deux : 540 sur 540 pour chacun, simultanément. C'est anormal. Dans un système réel, un amendement
+corrige ce qui était faux, parfois une date de livraison, parfois une contrepartie mal saisie, parfois
+le sens. Ici jamais, pas même `status`, alors que 13 deals sont annulés puis amendés.
+
+Ampleur de la perturbation, sur les 575 deals multi-lignes :
+
+| | Volume MWh | Prix EUR/MWh |
+|---|---|---|
+| Moyenne | 1,86 | 0,079 |
+| Écart-type | 63,4 | 2,55 |
+| Q1 / médiane / Q3 | -15,95 / 0 / 19,70 | -1,31 / 0 / 1,29 |
+| Min / max | -396,4 / 530,9 | -11,79 / 9,86 |
+
+**Aucun biais.** L'erreur type de la moyenne vaut `63,4 / racine(575) = 2,64` pour le volume : une
+moyenne de 1,86 est à 0,7 erreur type de zéro, donc indiscernable de zéro. Idem pour le prix, 0,74
+erreur type. La médiane exactement nulle vient du bloc central des 35 doublons, environ 270 deltas
+négatifs, 35 nuls, 270 positifs.
+
+L'amendement est donc une **perturbation symétrique**, d'environ 5 % en volume et 2 % en prix, dans un
+sens ou dans l'autre. Combinée au `trade_ts` fabriqué à exactement +24 h, elle ressemble à une
+génération mécanique et non à un événement métier.
+
+### Pourquoi cette symétrie est un piège
+
+Sur l'agrégat, la perturbation ne coûte presque rien : 1 068 MWh sur 2,83 TWh, soit **0,04 %**. Un
+contrôle de position ne verrait strictement rien.
+
+Sur la ligne, elle coûte tout. Se tromper de version fait apparaître un écart sur environ **540 lignes**,
+d'une vingtaine de MWh et d'un euro et demi chacune, soit **6 % des 8 915 lignes** de la réconciliation.
+
+C'est le premier réflexe du projet vu à l'envers : ici **l'agrégat est juste alors que presque toutes
+les lignes sont fausses**, parce que des erreurs symétriques se compensent parfaitement au total. Un
+contrôle qui ne regarde que la somme validerait un fichier intégralement faux.
 
 ---
 

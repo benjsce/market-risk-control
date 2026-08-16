@@ -20,7 +20,7 @@ Tout nombre en gras est **mesuré**. Les autres sont dérivés et à recompter a
 | Mission | Objet | État |
 |---|---|---|
 | 0 | Cartographie du référentiel | close, 2 familles d'anomalies sur 4 |
-| 1 | Réconciliation front / back office | en cours, questions 1 et 2 tranchées sur 8 |
+| 1 | Réconciliation front / back office | en cours, questions 1, 2, 3, 7, 8 tranchées sur 8 |
 | 2 à 6 | Position, courbes, volumes, spot, restitution | non ouvertes |
 
 Deux points laissés ouverts en Mission 0 : le verdict sur les 899 sites sans contrat, et les
@@ -28,11 +28,8 @@ familles 3 et 4 d'anomalies du référentiel, jamais identifiées.
 
 ## Référentiel
 
-| Table | Lignes | Clé primaire | Historisation |
-|---|---|---|---|
-| `ref_customer` | **220** | `customer_id` | non, état courant |
-| `ref_site` | **1 400** | `site_id` | non, état courant |
-| `ref_contract` | **260** | `contract_id` | oui, contrats successifs |
+`ref_customer` **220** lignes, clé `customer_id`. `ref_site` **1 400**, clé `site_id`. `ref_contract`
+**260**, clé `contract_id`, seule table historisée, les contrats successifs y coexistent.
 
 - `dso`, `monitored`, `profile_type` sont **inexploitables** : affectation aléatoire. Ne jamais
   joindre, filtrer ni regrouper dessus.
@@ -100,6 +97,51 @@ serie.str.strip().str.upper().str.replace(r"^D0+", "D", regex=True)
 **Identité invariante :** non confirmés - orphelines = 9 000 - 8 945 = **55**. C'est le plancher des
 deals que le fichier back office ne contient tout simplement pas.
 
+## Jointure naïve sur la clé
+
+Une jointure interne rend `Σ n_bo(k) × n_fo(k)` lignes, vérifié : **9 495** pour **8 850** deals
+appariés, donc **645 en trop**. Décomposition avec `a = n_bo - 1` et `b = n_fo - 1` :
+excédent = `a + b + ab`, soit **576** dus au front, **65** au back office, **4** aux deux à la fois.
+Le terme croisé attendu sous indépendance valait 4,2 : les deux dégradations sont sans lien.
+
+89 % du gonflement n'est pas une anomalie mais une jointure qui omet de sélectionner la version en
+vigueur. La correction est à faire côté requête, pas côté fichier.
+
+| Grandeur | Naïf | Correct | Gonflement |
+|---|---|---|---|
+| Volume traité | 2 987 513,8 MWh | 2 790 477,6 MWh | **7,06 %** |
+| Notionnel | 177 141 863,71 EUR | 165 672 694,97 EUR | **6,92 %** |
+
+Volume **brut**, pas position nette : la convention de signe n'est pas encore tranchée. Et le notionnel
+n'est ni une perte ni une valorisation de marché.
+
+## Contrepartie et sélection de version
+
+**Mapping contrepartie** : `counterparty.str[:6]`, 12 codes des deux côtés, injectif et exhaustif par
+mesure. Aucun écart sur les 8 915 lignes. Mais rien ne garantit l'injectivité : elle tient sur le
+domaine du 24 juillet 2026, pas par construction. À remplacer par une table explicite.
+
+**Table de base de la réconciliation** : `rec`, 8 915 lignes, `bo` joint sur `fo_derniere_version`.
+
+**Sélection de version** : dernière version par `deal_id`, puis `status = 'CONFIRMED'`, soit **8 337**
+deals et **2 616 247,1 MWh**. Interdit d'arbitrer par `MAX(trade_ts)`, la colonne est fabriquée.
+
+Coût de ne pas trancher, parts rapportées au chiffre naïf de 3 010 338,7 MWh :
+
+| Correction | MWh | Part |
+|---|---|---|
+| Sélection de version | -174 810,4 | 5,81 % |
+| Filtre `CONFIRMED` | -219 281,2 | 7,28 % |
+| Total | **-394 091,6** | **13,09 %** |
+
+Soit **+15,1 %** de surestimation rapportée à la valeur vraie. Le filtre de statut coûte plus cher que
+la sélection de version.
+
+**Un amendement ne change que `volume_mwh`, `price_eur_mwh` et `trade_ts`**, sur 540 deals, jamais les
+dates, le sens, la contrepartie ni le statut. Perturbation symétrique et centrée sur zéro, environ 5 %
+en volume et 2 % en prix. Elle ne coûte que 0,04 % sur l'agrégat mais fausse environ 540 lignes, soit
+6 % de la réconciliation.
+
 ## Anomalies et candidats
 
 | Source | Anomalie | Volume | Chiffre |
@@ -161,3 +203,25 @@ Ce qui se transporte hors du TP. Les chiffres ci-dessus sont synthétiques ; ces
 
 12. **Les deux anti-jointures se comptent séparément.** Leur différence est fixée par les cardinaux,
     donc un seul des deux nombres est libre.
+
+13. **Une jointure apparie toutes les combinaisons, pas une ligne avec une ligne.** Un doublon d'un
+    seul côté suffit à dupliquer une transaction : l'excédent vaut `a + b + ab`, pas `a × b`. Avant
+    toute jointure, vérifier l'unicité de la clé des deux côtés.
+
+14. **Annoncer le dénominateur d'un taux.** Rapporté à la valeur correcte ou à la valeur affichée, le
+    même écart donne deux chiffres différents. Pour un écart de réconciliation, la référence est la
+    valeur correcte.
+
+15. **Un agrégat juste peut recouvrir des lignes toutes fausses.** Des erreurs symétriques se
+    compensent parfaitement au total. Un contrôle qui ne regarde que la somme valide un fichier
+    intégralement faux. Le corollaire du réflexe 1, dans l'autre sens.
+
+16. **Une décomposition doit partager une base unique et sommer au total.** Sinon le lecteur ne peut
+    pas vérifier que les causes couvrent tout l'écart, ce qui est le seul intérêt de la décomposition.
+
+17. **Un mapping par troncature n'est jamais injectif par construction.** Il peut l'être par mesure
+    sur un domaine donné, ce qui est une propriété fragile, à rejouer à chaque entrée nouvelle.
+
+18. **En pandas, l'arithmétique aligne par index, silencieusement.** `+`, `*`, `mul`, `reindex`
+    travaillent sur l'index ; `isin`, `==`, `str.*` sur les valeurs de l'objet appelé. Deux Series de
+    même longueur mais d'index différents ne se multiplient pas terme à terme.
