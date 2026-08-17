@@ -999,14 +999,299 @@ lignes : montre-le. »*
 *« Certaines quantités sont dans une autre unité. Comment le détectes-tu sans que la colonne d'unité te
 le dise ? Cette colonne peut mentir, et sur un vrai extrait elle mentira. »*
 
-> à remplir
+### Le principe
+
+La colonne `unit` est une **affirmation**, pas une mesure. Lui faire confiance réduit la question à un
+filtre et ne prouve rien. Le détecteur doit donc être construit sans elle, puis confronté à elle : c'est
+la confrontation qui dit si elle ment.
+
+Trois étages, dont les deux premiers ne consultent jamais l'étiquette.
+
+### Étage 1 : la forme de la distribution
+
+```python
+bo["quantity"].describe()
+```
+
+| Statistique | Valeur |
+|---|---|
+| Moyenne | 2 639 |
+| Écart-type | 33 710 |
+| Q1 / médiane / Q3 | 124,2 / 222,5 / 398,0 |
+| Min / max | 9,7 / **1 372 200** |
+
+Quatre signaux concordants :
+
+1. **La moyenne vaut 12 fois la médiane.** Sur une population homogène, même asymétrique, elles restent
+   du même ordre. Un tel écart signale que quelques valeurs très grandes tirent la moyenne sans déplacer
+   la médiane, insensible aux extrêmes.
+2. **L'écart-type dépasse la moyenne d'un facteur 12,8**, soit un coefficient de variation de 12,8 là où
+   une population ordinaire donne 0,3 à 1.
+3. **Le maximum est à 3 447 fois le troisième quartile.**
+4. **Le corps est compact puis c'est la falaise.** 124, 222, 398 tiennent dans un facteur 3,2.
+
+Le quatrième point est celui qui distingue un **mélange** d'une simple queue épaisse. Une distribution à
+queue lourde s'élargit progressivement, par étapes. Ici il n'y a pas d'étalement, il y a un saut de trois
+ordres de grandeur. Deux populations, pas une queue.
+
+**Estimation de l'effectif, avant tout comptage.** En posant `n` lignes valant environ 1 000 fois les
+autres, autour de 250 :
+
+```
+(9 010 - n) x 250 + n x 250 000 = 9 010 x 2 639     donne     n = 86
+```
+
+Nombre **estimé**, non mesuré : il repose sur une valeur typique de 250 et un facteur exactement 1 000,
+deux hypothèses fausses au vu de l'étalement réel sur trois décades. Il a servi à orienter la prédiction,
+il ne chiffre rien.
+
+### Étage 2 : la séparation par ordre de grandeur
+
+```python
+ordre = np.log10(bo["quantity"]).round()
+pd.crosstab(ordre, bo["unit"])
+```
+
+Le logarithme transforme un facteur en décalage : `log10(1 000 x v) = 3 + log10(v)`. **Un facteur 1 000
+devient toujours un décalage de +3**, quelle que soit la valeur de départ, ce qui rend deux populations
+séparées par un facteur constant visibles et dénombrables. Sans lui, des valeurs allant de 9,7 à 1 372 200
+se tassent toutes dans la première classe d'un histogramme.
+
+| Ordre | KWH | MWH |
+|---|---|---|
+| 1 | 0 | 106 |
+| 2 | 0 | 5 837 |
+| 3 | 0 | 2 991 |
+| 4 | 2 | 6 |
+| 5 | 44 | 0 |
+| 6 | 24 | 0 |
+
+`round` centre les classes sur les puissances de 10 : l'ordre 3 couvre 316 à 3 162, et non 1 000 à 9 999.
+Un `floor` donnerait les bornes rondes, mais couperait en deux un paquet situé sur une puissance de 10.
+
+Les 70 lignes déclarées `KWH` sont **toutes** grandes, et divisées par 1 000 elles retombent aux ordres 1
+à 3, là où vit la population MWh. Restaient 6 lignes déclarées `MWH` à l'ordre 4, entre 3 162 et 31 623
+MWh, soit 10 à 100 fois le deal typique.
+
+### Étage 3 : le ratio contre le front
+
+L'ordre de grandeur ne tranche pas ligne à ligne, un gros deal légitime existant. Le front fournit la
+référence exacte.
+
+```python
+rec["ratio"] = rec["quantity"] / rec["volume_mwh"]
+pd.crosstab(rec["ratio"].round(3), rec["unit"])
+```
+
+| `ratio` | KWH | MWH |
+|---|---|---|
+| 1,0 | 0 | **8 845** |
+| 1 000,0 | **70** | 0 |
+
+**Deux valeurs seulement, et parfaitement rondes.** Donc aucun écart de quantité en dehors de l'unité :
+le back office reproduit exactement le volume du front sur les 8 845 autres lignes, et les 6 lignes
+d'ordre 4 déclarées `MWH` sont de gros deals légitimes.
+
+**La diagonale est parfaite : la colonne `unit` dit vrai**, établi par un chemin qui ne la consulte
+jamais. Les 70 sont toutes dans `rec`, donc aucune ne se cache parmi les 95 orphelines.
+
+La réponse à la question est donc **méthodologique et non factuelle**. Le sujet ne dit pas que la colonne
+ment ici, il dit qu'elle mentira sur un vrai extrait. Le détecteur construit ne dépend d'elle à aucun
+moment, et c'est ce qui le rend transposable.
+
+### Impact
+
+Que la colonne soit honnête ne rend pas les 70 lignes inoffensives.
+
+```python
+mal_unite = np.isclose(rec["ratio"], 1000)
+```
+
+| Grandeur | Valeur |
+|---|---|
+| Lignes en kWh | **70**, soit 0,79 % |
+| Volume réel de ces lignes | **20 952,4 MWh** |
+| Somme naïve de `quantity` | 23 743 745,0 |
+| Somme correcte | 2 812 297,4 |
+| **Erreur** | **+20 931 448 MWh, facteur 8,44** |
+
+Le modèle se ferme : une ligne en kWh compte 1 000 fois son volume au lieu d'une, donc l'excédent vaut
+999 fois le volume réel, et `999 x 20 952,4 = 20 931 447,6`, l'excédent mesuré au dixième près.
+
+**70 lignes sur 8 915, moins de 0,8 % du fichier, produisent une erreur de près de huit fois.** À
+comparer aux 7 % de la jointure naïve et aux 15 % de la non-sélection de version : c'est de très loin la
+famille la plus toxique.
+
+### Piège technique rencontré
+
+Une première version du filtre s'écrivait `rec["ratio"] == 1000`, égalité exacte entre flottants. Elle
+n'a retenu que **59** lignes sur 70 : la division produit parfois 999,9999999999999, et l'égalité stricte
+échoue. Le `value_counts` précédent passait par `.round(3)`, qui masquait le problème.
+
+L'arithmétique a révélé l'erreur avant tout recomptage : l'excédent mesuré impliquait 20 952,4 MWh de
+volume réel, contre 18 496,1 mesurés sur 59 lignes, soit 2 455,3 MWh manquants pour 11 lignes, très
+exactement 223 MWh par ligne, le volume médian du portefeuille.
+
+**Ne jamais tester l'égalité exacte entre flottants.** Utiliser `np.isclose`, arrondir avant de comparer,
+ou comparer un écart absolu à une tolérance explicite.
 
 ## 6. Convention de signe inversée
 
 *« Certaines lignes ont une convention de signe inversée. Quel contrôle la révèle ? Ce n'est pas la
 comparaison du sens : c'est un invariant qui doit tenir même quand le sens est mal renseigné. »*
 
-> à remplir
+### La famille existe : 55 lignes
+
+```python
+pd.crosstab(rec["buy_sell"], rec["direction"])
+```
+
+| | `BUY` | `SELL` |
+|---|---|---|
+| `B` | 5 139 | **24** |
+| `S` | **31** | 3 721 |
+
+**55 lignes où les deux systèmes se contredisent sur le sens.** Mais ce chiffre ne tranche rien : il dit
+que les deux sources divergent, jamais laquelle a raison. Un désaccord n'est pas un verdict, et c'est
+exactement l'avertissement du sujet.
+
+### Recherche de l'invariant : quatre pistes, quatre échecs
+
+Un invariant utile doit être vérifiable **dans une seule source**, indépendamment de ce que la colonne de
+sens raconte sur une ligne donnée.
+
+**Piste 1, le signe porté par la valeur.** Dans beaucoup de systèmes, le sens est codé par le signe du
+volume, une vente étant négative. Coexistant avec une colonne de sens, cette redondance serait un
+contrôle gratuit. Mesuré : **0 volume négatif au front, 0 quantité négative au back office**. Le signe
+n'est porté que par la colonne de sens, il n'y a aucune redondance.
+
+**Piste 2, la vocation économique du book.** Un fournisseur B2B vend à ses clients, il doit donc acheter
+sur le marché : un book de couverture devrait être massivement acheteur, et un `SELL` y serait suspect.
+
+| Book | Part de `BUY` |
+|---|---|
+| `B2B_FR_GAS_HEDGE` | 58,4 % |
+| `B2B_FR_POWER_HEDGE` | 57,9 % |
+| `B2B_FR_POWER_TRADING` | 66,1 % |
+| `B2B_FR_STRUCT` | 61,0 % |
+| `B2B_FR_GAS_TRADING` | 42,7 % |
+| **Ensemble** | **58,0 %** |
+
+Aucun book n'a de sens dominant, et les books de couverture collent à la marginale globale. `direction`
+est **indépendant de `book`** : rien à en tirer. Qu'un book de couverture soit à 58 % acheteur est
+économiquement discutable, mais c'est une autre anomalie, consignée plus bas.
+
+**Piste 3, le statut back office.** La colonne `state` aurait pu signaler les lignes douteuses. Elle
+compte 3 lignes `CXL` parmi les 55, là où la proportion en prédit 1,7 : du bruit sur de tels effectifs.
+
+**Piste 4, une signature de population.** Une famille plantée en a presque toujours une. Répartition des
+55 par book, comparée à celle du portefeuille :
+
+| Book | Attendu | Observé |
+|---|---|---|
+| `GAS_HEDGE` | 20,4 | 22 |
+| `POWER_HEDGE` | 30,7 | 30 |
+| `GAS_TRADING` | 1,3 | 2 |
+| `POWER_TRADING` | 1,5 | 1 |
+| `STRUCT` | 1,2 | 0 |
+
+Proportionnelle partout. Le sens lui-même ne les biaise pas non plus : 31 `BUY` sur 55, soit 56,4 %,
+contre 58,0 % dans le portefeuille. Et le recoupement avec les autres familles est nul : une seule des 55
+est aussi en kWh, là où l'indépendance en prédit 0,43.
+
+**Les signes inversés sont une corruption aléatoire de 0,62 % des lignes.** Ils ne se concentrent nulle
+part, et cette conclusion ferme la piste 4 par construction : **aucune régularité de population ne peut
+les révéler, puisqu'ils épousent la population.**
+
+### Réserve : l'invariant n'a pas été trouvé
+
+Les redondances disponibles sont épuisées. Le volume n'est pas signé, `book` ne contraint pas
+`direction`, `state` ne signale rien, et les 55 sont statistiquement indiscernables du reste.
+
+Ce qui est établi sans réserve : **la famille existe, 55 lignes, et son impact est chiffrable.** Ce qui
+reste ouvert : l'invariant que le sujet a en tête, consigné ici comme non résolu plutôt que remplacé par
+une réponse inventée.
+
+### Ce que l'absence d'arbitre change au chiffrage
+
+Sans invariant, aucune des deux sources ne fait autorité. Il n'y a donc **pas d'erreur mesurable**, mais
+**deux positions possibles**, et l'écart entre elles n'est pas une erreur : c'est la **largeur de
+l'indétermination**. Elle vaut le même nombre dans les deux sens, ce qui rend la question « qui a raison »
+inutile pour le chiffrage.
+
+Restriction aux lignes en vigueur, `status = CONFIRMED`, soit **49** des 55. Les 3 annulées et les 3 en
+attente ne portent aucune position. Le premier nombre mesure le désordre du fichier, le second l'erreur
+de position, et c'est le second que le management lit.
+
+```python
+litiges      = rec[discord & (rec["status"] == "CONFIRMED")].copy()
+concordantes = rec[(~discord) & (rec["status"] == "CONFIRMED")].copy()
+
+def net_signe(table):
+    return np.where(table["direction"] == "BUY",
+                    table["volume_mwh"], -table["volume_mwh"]).sum()
+
+position_front = net_signe(concordantes) + net_signe(litiges)
+position_bo    = net_signe(concordantes) - net_signe(litiges)
+```
+
+`position_bo` se déduit en retranchant au lieu d'ajouter, puisque par définition le back office donne le
+sens opposé sur exactement ces lignes.
+
+| Grandeur | Valeur |
+|---|---|
+| Lignes litigieuses en vigueur | **49** |
+| Volume brut engagé | **14 409,4 MWh** |
+| Net signé de ces lignes | **42,8 MWh** |
+| Position, convention front | **435 523,7 MWh** |
+| Position, convention back office | **435 438,1 MWh** |
+| **Largeur d'indétermination** | **85,6 MWh, soit 0,020 %** |
+
+**La compensation atteint 99,7 %**, ce qui découle directement du caractère aléatoire de l'injection
+établi plus haut : sans biais de sens, les erreurs s'annulent.
+
+Formulation à retenir pour le livrable, qui ne suppose aucun arbitre :
+
+> La position nette du portefeuille n'est déterminée qu'à 85,6 MWh près, faute de pouvoir trancher le
+> sens de 49 transactions.
+
+### Le chiffre qu'il ne faut pas remonter seul
+
+Le volume **exposé** est de 14 409 MWh, pas de 85,6. Si les 49 lignes avaient été toutes du même sens,
+l'indétermination aurait valu deux fois ce volume brut :
+
+```
+2 x 14 409,4 = 28 818,8 MWh   =   6,62 % de la position
+```
+
+**L'impact réalisé est 337 fois plus petit que l'impact possible.** Remonter les seuls 85,6 MWh laisse
+croire que l'anomalie est bénigne, alors que le mécanisme qui l'a produite pouvait coûter 6,6 % de la
+position. C'est la distinction entre exposition et perte réalisée.
+
+Et la compensation ne tient qu'**au niveau du total**. Par book, par contrepartie, par mois de livraison
+ou ligne à ligne, les 49 restent fausses et ne se compensent plus.
+
+### Deux contrôles inter-systèmes qui passent, et une piste ouverte
+
+**Statuts.** `pd.crosstab(rec.state, rec.status)` est parfaitement diagonal : `CXL` face à `CANCELLED`
+pour 271 lignes, `MATCHED` face à `CONFIRMED` pour 8 265 et à `PENDING` pour 379. La correspondance
+n'est pas bijective, le back office regroupant `CONFIRMED` et `PENDING` sous `MATCHED`, mais elle est
+fonctionnelle dans le sens qui compte. **Aucun écart de statut.**
+
+**Piste ouverte, mise de côté par arbitrage de temps.** `pd.crosstab(rec.commodity, rec.book)` montre
+**454 deals logés dans un book de la commodité opposée**, soit 5,1 % :
+
+| Cellule | Effectif |
+|---|---|
+| GAS dans `POWER_HEDGE` | 100 |
+| GAS dans `POWER_TRADING` | 101 |
+| POWER dans `GAS_HEDGE` | 119 |
+| POWER dans `GAS_TRADING` | 134 |
+
+`B2B_FR_GAS_TRADING` contient plus d'électricité que de gaz, 134 contre 72. Et les quatre cellules
+croisées sont presque uniformes, 72 / 91 / 100 / 101 côté gaz et 104 / 119 / 134 / 135 côté électricité,
+ce qui est la signature d'une affectation au hasard plutôt que d'erreurs ponctuelles. À reprendre en
+Mission 2, où `book` est un axe d'agrégation.
 
 ## 7. Mapping des codes contrepartie
 
