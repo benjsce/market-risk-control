@@ -992,7 +992,140 @@ la convention de signe, question 6, encore ouverte.
 seuil, et sur quelle base ? Le seuil en valeur absolue et le seuil en relatif ne classent pas les mêmes
 lignes : montre-le. »*
 
-> à remplir
+### Volumétrie
+
+198 lignes sur 8 915, soit **2,2 %**, portent un écart entre `price_eur_mwh` du front et `unit_price` du
+back office. Écarts définis signés, positif signifiant que le back office annonce plus cher, et rapportés
+au prix du front conformément à la convention de dénominateur posée en question 3.
+
+### Deux populations, séparées par leur mécanisme et non par un seuil
+
+```python
+ecarts_prix["arrondi_2d"] = np.isclose(ecarts_prix["unit_price"],
+                                       ecarts_prix["price_eur_mwh"].round(2))
+```
+
+| `arrondi_2d` | Lignes | Écart min | Écart max |
+|---|---|---|---|
+| **True** | **106** | -0,005 | **+0,005** |
+| **False** | **92** | -5,390 | +3,522 |
+
+Le groupe `True` est borné exactement par ±0,005. Ce n'est pas une observation empirique mais une
+**conséquence mathématique** : un arrondi au centième ne peut pas déplacer une valeur de plus d'un
+demi-centime. Ces 106 lignes ne sont pas des écarts, ce sont deux représentations du même prix, le back
+office arrondissant à deux décimales là où le front en porte trois.
+
+Les 92 autres portent quatre décimales et un vrai désaccord, jusqu'à 5,39 EUR/MWh.
+
+**C'est la réponse à « sur quelle base ».** Le seuil ne relève pas d'une intuition, il se déduit de la
+précision de la donnée : tout écart qu'un arrondi peut expliquer n'est pas un écart économique.
+
+### Le seuil absolu, et pourquoi 0,006 et non 0,005
+
+Posé d'abord à 0,005, la borne théorique exacte, le seuil a classé **4 lignes d'arrondi comme
+matérielles**. `24,080 - 24,085` ne rend pas -0,005 mais -0,005000000000001336, et le test `> 0,005`
+renvoie `True`.
+
+La preuve est arithmétique : 106 lignes d'arrondi, mais seulement 102 classées non matérielles.
+
+Recalibré à **0,006**, un cran au-dessus de la borne :
+
+```python
+ecarts_prix["mat_abs"] = ecarts_prix["ecart_eur"].abs() > 0.006
+
+(ecarts_prix["mat_abs"] == ~ecarts_prix["arrondi_2d"]).all()      # True
+```
+
+**Le contrôle passe : le seuil reproduit exactement la partition par mécanisme, 92 contre 92.** Il n'est
+donc plus une approximation commode, c'est une règle vérifiable.
+
+Troisième occurrence du même piège en deux jours. **Un seuil ne se pose jamais exactement sur une borne
+théorique** : l'imprécision binaire la franchit dans les deux sens.
+
+### Les deux seuils sont emboîtés, pas croisés
+
+```python
+SEUIL_EUR = 0.006
+SEUIL_REL = 0.001
+pd.crosstab(ecarts_prix["mat_abs"], ecarts_prix["mat_rel"])
+```
+
+| | `mat_rel` False | `mat_rel` True |
+|---|---|---|
+| `mat_abs` **False** | 106 | **0** |
+| `mat_abs` **True** | **3** | 89 |
+
+**La case en haut à droite est vide, et ce n'est pas un hasard.** Les prix du portefeuille vont de 21 à
+95 EUR/MWh. Être matériel en relatif exige donc au moins `0,001 x 21 = 0,021` EUR/MWh, ce qui dépasse
+toujours le seuil absolu de 0,006. **Matériel en relatif implique matériel en absolu**, et le seuil
+relatif est redondant.
+
+Le désaccord ne devient bilatéral que si le seuil absolu tombe **dans la fenêtre** balayée par le seuil
+relatif sur la plage de prix :
+
+```
+seuil_rel x prix_min  <  seuil_abs  <  seuil_rel x prix_max
+0,021                 <  seuil_abs  <  0,095
+```
+
+C'est démontrable sans données, et c'est l'enseignement le plus solide de la question : **deux seuils ne
+se croisent que si on les calibre l'un par rapport à l'autre.** Hors de cette fenêtre, on croit contrôler
+deux choses et on n'en contrôle qu'une.
+
+### Les trois lignes classées différemment
+
+| `deal_id` | Prix | Écart EUR | Écart relatif |
+|---|---|---|---|
+| `D2602764` | 30,044 | -0,0261 | -0,0869 % |
+| `D2602764` | 30,044 | -0,0261 | -0,0869 % |
+| `D2600329` | 67,747 | -0,0651 | -0,0961 % |
+
+Matérielles en absolu, juste sous le seuil relatif. La démonstration réclamée par le sujet est faite, et
+elle tient en trois lignes parce que les seuils retenus sont presque emboîtés.
+
+`D2602764` figure deux fois : c'est un des 65 doublons de confirmation. **Deux familles se recoupent sur
+cette transaction.**
+
+### Ni l'un ni l'autre seuil ne mesure la matérialité
+
+Un écart de 5 EUR/MWh sur 50 MWh pèse 250 EUR ; un écart de 0,1 EUR/MWh sur 6 000 MWh pèse 600 EUR. La
+matérialité économique est le produit `ecart_eur x volume_mwh`, et elle ne coïncide avec aucun des deux
+classements.
+
+```python
+top_abs = les 10 plus gros ecarts de prix
+top_imp = les 10 plus gros impacts en euros
+```
+
+**5 deals communs sur 10.** La moitié des plus gros écarts de prix ne figure pas parmi les plus gros
+impacts, et réciproquement. Trier par écart de prix, quel que soit le seuil, ne fait pas remonter les
+lignes qui coûtent le plus.
+
+C'est ce qui justifie que la liste d'anomalies du livrable soit classée par impact et non par écart.
+
+### Impact chiffré
+
+Restriction aux lignes matérielles et en vigueur, `status = CONFIRMED` : **84 lignes** sur les 92.
+
+| Grandeur | Valeur |
+|---|---|
+| Impact net | **-5 576,93 EUR** |
+| Impact brut | **47 949,91 EUR** |
+| Taux de compensation | **88,4 %** |
+| Impact minimum sur une ligne | -10 583,72 EUR |
+| Impact maximum sur une ligne | +4 066,27 EUR |
+
+Le net et le brut sont donnés séparément pour la raison établie en question 6 : les écarts se compensent
+à 88 %, et publier le seul net minimiserait une exposition de 47 950 EUR bien réelle.
+
+**Concentration** : les 10 plus grosses lignes portent **65,0 %** de l'impact brut, les 20 plus grosses
+**78,2 %**. La liste à remonter au back office tient donc sur une page, ce qui est le format attendu.
+
+Deux observations sur ce palmarès, **non vérifiées à ce stade** : les dix premières lignes sont toutes
+en `POWER`, ce qui peut n'être qu'un effet de taille puisque les prix électricité sont plus élevés ; et
+`D2604704` y figure deux fois, gonflant l'impact de 4 066 EUR par un doublon de confirmation. Cette
+seconde observation impose de dédoublonner avant de sommer, sous peine de compter deux fois le même
+écart.
 
 ## 5. Détection d'unité sans la colonne d'unité
 

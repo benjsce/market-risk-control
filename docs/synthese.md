@@ -20,7 +20,7 @@ Tout nombre en gras est **mesuré**. Les autres sont dérivés et à recompter a
 | Mission | Objet | État |
 |---|---|---|
 | 0 | Cartographie du référentiel | close, 2 familles d'anomalies sur 4 |
-| 1 | Réconciliation front / back office | en cours, questions 1, 2, 3, 7, 8 tranchées sur 8 |
+| 1 | Réconciliation front / back office | en cours, **6 questions sur 8** tranchées, reste la 4 et le moteur |
 | 2 à 6 | Position, courbes, volumes, spot, restitution | non ouvertes |
 
 Deux points laissés ouverts en Mission 0 : le verdict sur les 899 sites sans contrat, et les
@@ -142,6 +142,33 @@ dates, le sens, la contrepartie ni le statut. Perturbation symétrique et centr�
 en volume et 2 % en prix. Elle ne coûte que 0,04 % sur l'agrégat mais fausse environ 540 lignes, soit
 6 % de la réconciliation.
 
+## Unités et signes
+
+**70 lignes en kWh**, 20 952,4 MWh réels. Sommer `quantity` sans convertir donne un **facteur 8,44**,
+20 931 448 MWh fantômes. 0,79 % du fichier, la famille de loin la plus toxique. La colonne `unit` est
+**honnête**, vérifié sans jamais la consulter. Aucun écart de quantité ailleurs : ratio exactement 1.
+
+Détecteur transposable, les deux premiers étages n'utilisant aucune colonne d'unité : forme de la
+distribution, moyenne contre médiane et max contre Q3 ; puis `round(log10(x))`, un facteur 1 000 devenant
+un décalage de +3 ; puis ratio contre une source de référence.
+
+**55 lignes à sens contradictoire**, 49 en vigueur. Injection aléatoire, indiscernable de la population
+sur book, commodité, sens et autres familles. **Aucun invariant trouvé** pour arbitrer, donc pas d'erreur
+mesurable mais une fourchette :
+
+| Grandeur | Valeur |
+|---|---|
+| Volume brut engagé | 14 409,4 MWh |
+| Position, convention front | 435 523,7 MWh |
+| Position, convention back office | 435 438,1 MWh |
+| Indétermination | **85,6 MWh, soit 0,020 %** |
+| Impact possible si même sens | **28 818,8 MWh, soit 6,62 %** |
+
+**Contrôles inter-systèmes qui passent intégralement** : contrepartie, statut, quantité hors unité.
+
+**Piste ouverte, Mission 2** : 454 deals dans un book de la commodité opposée, répartition quasi uniforme
+donc affectation probablement aléatoire.
+
 ## Anomalies et candidats
 
 | Source | Anomalie | Volume | Chiffre |
@@ -222,6 +249,18 @@ Ce qui se transporte hors du TP. Les chiffres ci-dessus sont synthétiques ; ces
 17. **Un mapping par troncature n'est jamais injectif par construction.** Il peut l'être par mesure
     sur un domaine donné, ce qui est une propriété fragile, à rejouer à chaque entrée nouvelle.
 
-18. **En pandas, l'arithmétique aligne par index, silencieusement.** `+`, `*`, `mul`, `reindex`
+18. **Ne jamais tester l'égalité exacte entre flottants.** `np.isclose`, ou arrondir avant de comparer,
+    ou comparer un écart absolu à une tolérance explicite. Une division qui devrait tomber sur 1 000
+    rend parfois 999,9999999999999, et le filtre perd des lignes sans rien signaler.
+
+19. **Sans arbitre, on ne mesure pas une erreur mais une fourchette.** Quand deux sources divergent et
+    qu'aucune ne fait autorité, l'écart entre elles est la largeur de l'indétermination, pas une erreur.
+    Le dire ainsi est plus honnête que de choisir un côté pour publier un chiffre net.
+
+20. **Distinguer l'impact réalisé de l'exposition.** Des erreurs symétriques peuvent se compenser à
+    99,7 % par chance. Remonter le seul impact réalisé laisse croire que l'anomalie est bénigne, alors
+    que le mécanisme qui l'a produite pouvait coûter des centaines de fois plus.
+
+21. **En pandas, l'arithmétique aligne par index, silencieusement.** `+`, `*`, `mul`, `reindex`
     travaillent sur l'index ; `isin`, `==`, `str.*` sur les valeurs de l'objet appelé. Deux Series de
     même longueur mais d'index différents ne se multiplient pas terme à terme.
