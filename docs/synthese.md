@@ -20,7 +20,7 @@ Tout nombre en gras est **mesuré**. Les autres sont dérivés et à recompter a
 | Mission | Objet | État |
 |---|---|---|
 | 0 | Cartographie du référentiel | close, 2 familles d'anomalies sur 4 |
-| 1 | Réconciliation front / back office | en cours, **6 questions sur 8** tranchées, reste la 4 et le moteur |
+| 1 | Réconciliation front / back office | **close**, 8 questions sur 8 et moteur produit |
 | 2 à 6 | Position, courbes, volumes, spot, restitution | non ouvertes |
 
 Deux points laissés ouverts en Mission 0 : le verdict sur les 899 sites sans contrat, et les
@@ -168,6 +168,35 @@ mesurable mais une fourchette :
 
 **Piste ouverte, Mission 2** : 454 deals dans un book de la commodité opposée, répartition quasi uniforme
 donc affectation probablement aléatoire.
+
+## Moteur de réconciliation
+
+Détail dans `moteur_mission1.md`. Périmètre **9 160** lignes : appariées (8 915), confirmations sans deal
+(95), deals sans confirmation (150). Catégories exclusives par ordre de correction, du dédoublonnage vers
+la valorisation.
+
+| Catégorie | Lignes | En vigueur | Impact EUR brut |
+|---|---|---|---|
+| quantité en kWh | 70 | 61 | **994 187 337** |
+| deal sans confirmation | 150 | 133 | 2 298 106 |
+| confirmation sans deal | 95 | 91 | 1 751 654 |
+| ligne dupliquée dans l'extrait | 65 | 61 | 1 146 076 |
+| écart de prix matériel | 89 | 81 | 43 616 |
+| écart de prix par arrondi | 102 | 91 | 86 |
+| sens contradictoire | 54 | 49 | indétermination 85,6 MWh |
+| concordante | 8 535 | 7 922 | 0 |
+
+**Une famille pèse 99,5 % de l'impact.** Les écarts de prix se compensent à 78 %, d'où les deux colonnes
+net et brut.
+
+**Les 95 confirmations sans deal forment un bloc contigu, `D9500000` à `D9500094`**, dans une plage que le
+front n'utilise pas (`D2600000` à `D2608999`, saturée sans trou). Elles ne sont pas des deals perdus,
+elles viennent d'ailleurs.
+
+**Seuil de matérialité prix** : absolu à **0,006 EUR/MWh**, un cran au-dessus de la borne d'arrondi au
+centime (0,005) que l'imprécision binaire franchit ; relatif à 0,1 %. Deux seuils ne se croisent que si
+le seuil absolu tombe dans la fenêtre `seuil_rel x prix_min` à `seuil_rel x prix_max`, sinon l'un est
+redondant.
 
 ## Anomalies et candidats
 
