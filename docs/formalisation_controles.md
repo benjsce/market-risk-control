@@ -33,7 +33,7 @@ En PySpark, $\lvert T \rvert$ s'écrit `T.count()` et $\lvert \pi_K(T) \rvert$ s
 Soit $K$ un ensemble de colonnes de $T$. Considérons l'application qui à une ligne associe sa
 projection sur $K$ :
 
-$$p_K : T \longrightarrow \pi_K(T), \qquad t \longmapsto t_{|K}$$
+$$p_K : T \longrightarrow \pi_K(T), \qquad t \longmapsto t_{\vert K}$$
 
 $K$ est une **clé** de $T$ si et seulement si $p_K$ est injective.
 
@@ -77,16 +77,16 @@ regroupement mais nomme les groupes fautifs ; la version globale tient en une li
 ## Énoncé
 
 Soit $S \subset \mathbb{N}^*$ un ensemble fini non vide. On veut tester que $S$ est l'intervalle
-entier $\llbracket 1, n \rrbracket$ pour un certain $n$, c'est-à-dire que $S$ est le domaine d'un
+entier $\{1, \dots, n\}$ pour un certain $n$, c'est-à-dire que $S$ est le domaine d'un
 rang qui commence à 1 et ne saute aucune valeur.
 
 ## Le test correct
 
-$$S = \llbracket 1, \lvert S \rvert \rrbracket
+$$S = \{1, \dots, \lvert S \rvert\}
 \iff \min S = 1 \ \text{ et } \ \max S = \lvert S \rvert$$
 
 Sens direct immédiat. Réciproque : si $\min S = 1$ et $\max S = \lvert S \rvert$, alors
-$S \subseteq \llbracket 1, \lvert S \rvert \rrbracket$, et ces deux ensembles ont le même cardinal,
+$S \subseteq \{1, \dots, \lvert S \rvert\}$, et ces deux ensembles ont le même cardinal,
 donc ils sont égaux.
 
 Deux quantités suffisent. Ni la moyenne, ni la somme, ni l'écart type ne sont nécessaires.
@@ -94,10 +94,10 @@ Deux quantités suffisent. Ni la moyenne, ni la somme, ni l'écart type ne sont 
 ## Pourquoi l'identité de l'étendue ne suffit pas
 
 Pour tout ensemble fini d'entiers, $\lvert S \rvert$ valeurs distinctes tiennent dans l'intervalle
-$\llbracket \min S, \max S \rrbracket$, d'où :
+$\{\min S, \dots, \max S\}$, d'où :
 
 $$\lvert S \rvert \le \max S - \min S + 1, \qquad
-\text{avec égalité} \iff S = \llbracket \min S, \max S \rrbracket$$
+\text{avec égalité} \iff S = \{\min S, \dots, \max S\}$$
 
 Cette identité teste la **contiguïté**, mais elle est invariante par translation : elle est vérifiée
 par $\{0,1,2,3\}$ comme par $\{1,2,3,4\}$. Elle ne dit rien sur l'origine du rang. Il faut lui
@@ -128,8 +128,8 @@ Un contrôle posé à la maille grossière teste donc la propriété de gauche, 
 alors que la propriété qui nous intéresse porte sur **chaque part**. Or l'implication ne va que dans
 un sens :
 
-$$\left( \forall s, \ \pi_c(T_s) = \llbracket 1, n \rrbracket \right)
-\implies \bigcup_s \pi_c(T_s) = \llbracket 1, n \rrbracket$$
+$$\left( \forall s, \ \pi_c(T_s) = \{1, \dots, n\} \right)
+\implies \bigcup_s \pi_c(T_s) = \{1, \dots, n\}$$
 
 et la réciproque est fausse.
 
@@ -170,7 +170,7 @@ agrégé devient faux tandis que chaque ligne prise isolément reste correcte.
 
 ## Anti-jointure
 
-$$T_1 \, \triangleright_K \, T_2 = \{\, t \in T_1 \ : \ t_{|K} \notin \pi_K(T_2) \,\}
+$$T_1 \, \triangleright_K \, T_2 = \{\, t \in T_1 \ : \ t_{\vert K} \notin \pi_K(T_2) \,\}
 \qquad \text{d'où} \qquad
 \lvert T_1 \triangleright_K T_2 \rvert \le \lvert T_1 \rvert$$
 
