@@ -468,12 +468,12 @@ comme objet. Ce n'est pas une question d'ordre d'exécution mais de **type de l'
 
 Garder « la dernière version de chaque deal » n'est pas un maximum mais un **argument du maximum** :
 
-$$t^\star_g = \operatorname{argmax}_{t \, \in \, T_g} \ v(t)$$
+$$t^\star_g = \mathrm{argmax}_{t \, \in \, T_g} \ v(t)$$
 
-$\max$ rend une valeur, $\operatorname{argmax}$ rend une ligne. Confondre les deux fait perdre les
+$\max$ rend une valeur, $\mathrm{argmax}$ rend une ligne. Confondre les deux fait perdre les
 autres colonnes de la ligne retenue.
 
-Deux pièges. L'$\operatorname{argmax}$ n'est **pas unique** si $v$ présente des ex aequo dans le
+Deux pièges. L'$\mathrm{argmax}$ n'est **pas unique** si $v$ présente des ex aequo dans le
 groupe : il faut un départage explicite, faute de quoi le résultat dépend de l'ordre de stockage. Et la
 **maille** $G$ est un choix : un maximum pris à une maille trop grossière retient un représentant qui
 ne couvre pas tout le domaine.
@@ -624,7 +624,7 @@ $$\log_{10}(\lambda \cdot x) = \log_{10}\lambda + \log_{10}x$$
 
 L'arrondi du logarithme décimal centre les classes sur les puissances de 10 :
 
-$$\operatorname{round}\big(\log_{10} r\big) = k
+$$\mathrm{round}\big(\log_{10} r\big) = k
 \iff 10^{\,k - 1/2} \ \le \ r \ < \ 10^{\,k + 1/2}$$
 
 soit un intervalle allant d'environ $0{,}316 \cdot 10^k$ à $3{,}162 \cdot 10^k$. La classe $k = 3$
@@ -785,7 +785,7 @@ $T$ désigne la table, $K$ un ensemble de colonnes, $G$ les colonnes de regroupe
 | comparaison de flottants | $\lvert a-b \rvert \le \text{atol} + \text{rtol}\lvert b \rvert$ | `abs(a - b) <= tol` | `np.isclose(a, b)` | `F.abs(F.col("a") - F.col("b")) <= tol` |
 | moyenne pondérée | $\sum v_i p_i / \sum v_i$ | `sum(v * p) / sum(v)` | `(v * p).sum() / v.sum()` | `F.sum(v * p) / F.sum(v)` |
 | net et brut | $\sum e_i$ et $\sum \lvert e_i \rvert$ | `sum(e), sum(abs(e))` | `e.sum(), e.abs().sum()` | `F.sum(e), F.sum(F.abs(e))` |
-| représentant par groupe | $\operatorname{argmax}_{T_g} v$ | `row_number() over (partition by G order by v desc)` | `sort_values(v).drop_duplicates(G, keep="last")` | `Window.partitionBy(G).orderBy(F.col(v).desc())` |
+| représentant par groupe | $\mathrm{argmax}_{T_g} v$ | `row_number() over (partition by G order by v desc)` | `sort_values(v).drop_duplicates(G, keep="last")` | `Window.partitionBy(G).orderBy(F.col(v).desc())` |
 | filtre sur agrégat | $\sigma_\varphi(\gamma_G(T))$ | `having` | `groupby(...).agg(...)` puis masque | `groupBy(...).agg(...).filter(...)` |
 
 ---
