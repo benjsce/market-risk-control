@@ -195,21 +195,143 @@ D'où le second contrôle, posé à la maille site, date, version.
 > Une somme naïve sur cette journée est-elle fausse ? Et un `GROUP BY delivery_hour_local` ? Les deux
 > réponses ne sont pas les mêmes, et c'est tout le sujet.
 
-Prédiction :
+## Périmètre de mesure
 
-> à remplir
+Le 25 octobre, **version 1 uniquement**. La table porte trois versions de prévision, dont une seule
+couvre l'ensemble du portefeuille :
 
-Somme naïve :
+| Version | Sites | Jours | Lignes |
+|---|---|---|---|
+| 1 | **500** | 365 | 4 374 240 |
+| 2 | 110 | 365 | 963 600 |
+| 3 | 50 | 365 | 437 280 |
 
-> à remplir
+Les laisser toutes trois mêlerait deux effets, la collision et la superposition de versions, et aucune
+mesure ne dirait lequel produit quoi. La superposition est le sujet de la question 3 ; ici elle est
+neutralisée en fixant la version 1, la seule complète.
 
-Agrégation par `delivery_hour_local` :
+Le périmètre compte donc **12 500 lignes**, soit 500 sites multipliés par les 25 heures du jour. Le
+compte confirme à la maille de la ligne ce que la question 1 avait établi à la maille des valeurs
+distinctes.
 
-> à remplir
+## Prédiction
 
-Ce que la différence enseigne :
+**La somme naïve est juste.** Une somme parcourt les lignes et n'utilise aucune colonne comme clé. Les
+25 heures réellement livrées sont présentes en 25 lignes par site, toutes additionnées.
 
-> à remplir
+**L'agrégation par `delivery_hour_local` est fausse dans sa décomposition et juste dans son total.**
+Elle rend 24 lignes au lieu de 25. Le total est identique, par l'invariance de la somme sous
+regroupement. Mais la ligne portant `2026-10-25 02:00` agrège deux heures de livraison distinctes,
+celles d'indices 3 et 4, et affiche donc environ le double de ses voisines.
+
+## Mesure
+
+| Lecture | Lignes en sortie | Total MWh |
+|---|---|---|
+| sans regroupement | **12 500** | **812 269,3** |
+| groupé par `hour_index` | **25** | **812 269,3** |
+| groupé par `delivery_hour_local` | **24** | **812 269,3** |
+
+Écart de total entre les trois lectures : **zéro** à la précision machine. Écart de lignes entre les
+deux clés : **une heure perdue**.
+
+Le profil horaire autour de la collision montre le mécanisme à nu :
+
+| `hour_index` | `delivery_hour_local` | Volume MWh |
+|---|---|---|
+| 1 | 2026-10-25 00:00 | 23 896,5 |
+| 2 | 2026-10-25 01:00 | 26 395,2 |
+| **3** | **2026-10-25 02:00** | **25 720,2** |
+| **4** | **2026-10-25 02:00** | **25 517,9** |
+| 5 | 2026-10-25 03:00 | 26 439,2 |
+| 6 | 2026-10-25 04:00 | 28 022,0 |
+
+La ligne collisionnée agrège **1 000 lignes d'origine**, soit les 500 sites multipliés par les deux
+heures réelles, pour un volume de **51 238,1 MWh**. Cette valeur est exactement la somme des indices 3
+et 4, et vaut **1,94 fois** la moyenne des heures voisines, les indices 2 et 5.
+
+## Somme naïve
+
+**Juste.** Le total de 812 269,3 MWh est le vrai volume livré ce jour-là. Le fait que la journée
+compte 25 heures et non 24 ne dérange pas une somme : elle additionne ce qui existe, sans hypothèse
+sur le nombre de termes.
+
+Un contrôle qui ne regarderait que ce total déclarerait la journée saine.
+
+## Agrégation par `delivery_hour_local`
+
+**Total juste, décomposition fausse.** C'est le point de la question, et il est général : pour une
+grandeur extensive, la somme est **invariante** par tout regroupement, injectif ou non, puisque les
+groupes partitionnent les lignes.
+
+$$\sum_{g} \ \sum_{t \in T_g} v(t) \ = \ \sum_{t \in T} v(t)$$
+
+Ce qui se perd n'est pas le total mais le **cardinal** : le regroupement rend
+$\lvert \pi_c(T) \rvert$ lignes, et cette quantité est strictement inférieure au nombre d'heures
+réelles dès que la clé n'est pas injective.
+
+Concrètement, le profil horaire produit porte une pointe fictive de près du double à 2 heures, et une
+heure a disparu. C'est ce profil, et non le total, que le desk utilise pour dimensionner sa
+couverture.
+
+## Ce que la différence enseigne
+
+Les deux défauts possibles d'une agrégation sont **symétriques**, et aucun contrôle unique ne les
+attrape tous les deux.
+
+| Défaut | Total | Décomposition | Contrôle qui l'attrape |
+|---|---|---|---|
+| explosion de jointure | **faux** | juste | contrôle de total |
+| fusion par clé non injective | juste | **fausse** | contrôle de cardinal |
+
+La Mission 1 avait rencontré le premier : la jointure naïve produisait 9 495 lignes pour 8 850 deals,
+chaque ligne restant individuellement correcte tandis que le total enflait. La Mission 4 rencontre le
+second, exactement à l'envers.
+
+**Il faut donc les deux contrôles.** Un harnais qui ne vérifie que les totaux valide une décomposition
+fausse ; un harnais qui ne vérifie que les cardinaux valide un total faux.
+
+La règle générale, formalisée dans `formalisation_controles.md`, sections 7 et 11 : avant d'agréger
+par une colonne, vérifier qu'elle est injective à la maille visée ; avant de joindre, vérifier
+l'unicité de la clé des deux côtés.
+
+## Décision de traitement
+
+**Ne jamais agréger sur `delivery_hour_local`.** La clé horaire du portefeuille est le couple
+`delivery_date` et `hour_index`, injectif par site et par version, vérifié à la question 1.
+
+`delivery_hour_local` reste utilisable pour l'**affichage** à destination d'un humain, où l'ambiguïté
+d'une heure par an est sans conséquence, jamais comme clé de calcul.
+
+*Alternative écartée* : désambiguïser la colonne en lui adjoignant le décalage UTC, ce qui la rendrait
+injective. Écartée parce que l'information du décalage n'est pas dans la table : elle devrait être
+reconstruite depuis `hour_index`, qui est déjà la clé cherchée. Reconstruire une clé fiable à partir
+d'une clé fiable pour réparer une clé ambiguë n'a pas d'intérêt.
+
+## Contrôle de la section
+
+| Contrôle | Nature | Résultat |
+|---|---|---|
+| lignes du périmètre | référence | 12 500 |
+| heures réelles et étiquettes locales | référence | 25 et 24 |
+| total conservé sous les trois lectures | invariant | écart nul à 10⁻⁶ MWh près |
+| étiquettes locales collisionnées | référence | 1 |
+| heures réelles fusionnées sous cette étiquette | référence | 2 |
+| lignes d'origine fusionnées | référence | 1 000 |
+| volume fusionné égal à la somme des deux heures | **invariant** | vérifié |
+
+Le dernier est le contrôle central : il prouve que la fusion est bien le mécanisme à l'oeuvre, et non
+une coïncidence de volumétrie. Les autres constatent, celui-ci démontre.
+
+Deux points de méthode retenus en l'écrivant :
+
+**Comparer une pointe à la bonne référence.** Rapportée à la moyenne des 23 autres heures de la
+journée, la ligne fusionnée ne vaut que 1,55 fois la référence, parce que les heures de jour sont
+bien plus grosses que celles du milieu de nuit. Rapportée aux heures **voisines**, elle vaut 1,94
+fois. La première mesure sous-estime l'anomalie d'un tiers en changeant de population de référence.
+
+**Ne jamais comparer deux flottants par égalité.** Les deux totaux coïncident, mais à une erreur de
+représentation près. Le contrôle compare leur écart absolu à une tolérance explicite.
 
 ## 3. Les versions de prévision
 
