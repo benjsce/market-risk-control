@@ -339,21 +339,138 @@ représentation près. Le contrôle compare leur écart absolu à une tolérance
 > sélection retiens-tu, et pourquoi le `MAX(version)` par site est un piège si tu ne réfléchis pas à
 > la granularité à laquelle tu l'appliques.
 
-Couverture de chaque version :
+## Couverture de chaque version
 
-> à remplir
+Trois versions coexistent, et elles ne couvrent pas le même portefeuille :
 
-Comparaison des trois règles :
-
-| Règle | Maille du `MAX` | Total MWh | Écart au total brut |
+| Version | Sites | Jours | Lignes |
 |---|---|---|---|
-| A | global | à remplir | à remplir |
-| B | par site | à remplir | à remplir |
-| C | par site et maille temporelle | à remplir | à remplir |
+| 1 | **500** | 365 | 4 374 240 |
+| 2 | **110** | 365 | 963 600 |
+| 3 | **50** | 365 | 437 280 |
 
-Règle retenue et alternative écartée :
+Le compte de versions par site donne **356 sites** à une seule version, **128** à deux et **16** aux
+trois. Mais ce compte ne dit pas lesquelles. La combinaison réellement détenue est plus instructive :
 
-> à remplir
+| Versions détenues | Sites |
+|---|---|
+| {1} | 356 |
+| {1, 2} | 94 |
+| {1, 3} | 34 |
+| {1, 2, 3} | 16 |
+
+**La version 1 est toujours présente.** C'est le socle du portefeuille : toute règle de sélection peut
+s'y replier, et aucun site n'existe sans elle. Les versions 2 et 3 sont des révisions partielles,
+portant sur des sous-ensembles disjoints à 16 sites près.
+
+## Complétude, par version
+
+L'année 2026 compte **8 760 heures** : 365 jours de 24 heures, les 23 heures du 29 mars et les 25 du
+25 octobre se compensant exactement.
+
+Neuf couples site et version sont en deçà, tous à **8 040 heures**, soit un déficit de 720 heures ou
+30 jours pleins :
+
+| Version | Couples incomplets |
+|---|---|
+| 1 | 8 |
+| 2 | 0 |
+| 3 | 1 |
+
+Huit sites sont concernés, pour **6 480 heures absentes** de la table. Sept d'entre eux ne détiennent
+que la version 1. Le huitième, **S500318**, détient les versions 1 et 3, et les deux sont incomplètes.
+
+## Le piège du `MAX(version)` par site
+
+Le sujet annonce un piège de granularité. Il est réel, et il faut distinguer deux formes.
+
+**La première forme est le maximum pris trop haut.** Le maximum global de `forecast_version` vaut 3,
+et seuls 50 sites détiennent cette version. Filtrer dessus jette 450 sites sur 500. C'est la règle A,
+et elle est catastrophique.
+
+**La seconde forme est le maximum pris par site alors qu'une version tardive ne couvre qu'une partie
+du calendrier.** Un site dont la version 3 ne porterait que 335 jours perdrait 30 jours de prévision
+que sa version 1 fournissait, sans qu'aucun contrôle de cohérence ne le signale : la table filtrée
+serait propre, simplement amputée.
+
+Un seul site pouvait déclencher ce défaut, S500318, dont la version 3 est incomplète. Mesure de ses
+deux calendriers :
+
+| Version | Dates couvertes | Dates communes aux deux |
+|---|---|---|
+| 1 | **335** | **335** |
+| 3 | **335** | |
+
+Deux ensembles de même cardinal dont l'intersection a ce cardinal sont égaux : **les deux versions ont
+exactement le même trou**, les mêmes 30 jours. Retenir la version 3 pour ce site ne perd donc rien, et
+le trou relève de la question 6 et non de la sélection de version.
+
+**Le piège ne se matérialise pas sur cet extrait.** C'est un résultat, pas une absence de résultat :
+la règle par site est sûre ici, et on sait pourquoi. Elle ne le serait pas sur un extrait où une
+révision partielle porterait sur un sous-ensemble de dates.
+
+## Comparaison des trois règles
+
+Base du taux : la règle C, posée à la maille la plus fine, donc tenue pour correcte.
+
+| Lecture | Lignes | Sites | Total MWh | Écart à C |
+|---|---|---|---|---|
+| sans filtre | 5 775 120 | 500 | **347 013 213,3** | **+19,7 %** |
+| **A**, max global = 3 | 437 280 | **50** | 9 929 072,5 | **-96,6 %** |
+| **B**, max par site | 4 374 240 | 500 | **289 888 282,2** | 0 |
+| **C**, max par site et heure | 4 374 240 | 500 | **289 888 282,2** | 0 |
+
+**Sens et ampleur de l'erreur.** La somme sans filtre **surestime de 19,7 %**, soit **57 124 931 MWh**
+comptés en double, parce que les heures des 144 sites multi-versions sont superposées deux ou trois
+fois. Le sens est toujours la surestimation : une superposition ajoute des lignes, elle n'en retire
+jamais.
+
+**B et C sont strictement identiques**, vérifié par soustraction dans les deux sens, zéro ligne de
+différence. C'est la conséquence directe du résultat précédent : chaque version tardive couvre
+l'intégralité du calendrier de son site, et la seule exception a un trou identique dans sa version 1.
+Descendre à la maille de l'heure n'apporte rien **ici**.
+
+Un faux ami à signaler : la règle B retient 4 374 240 lignes, ce qui est aussi le compte de la
+version 1 seule. Les populations sont différentes ; le nombre coïncide parce que dans les deux cas
+exactement huit calendriers de site sont amputés de 720 heures.
+
+## Règle retenue
+
+**Règle C**, maximum de version à la maille site, date, indice horaire.
+
+*Alternative écartée* : la règle B, par site. Elle donne exactement le même résultat sur cet extrait
+et coûte moins cher, mais sa justesse **dépend d'une propriété des données** et non de sa
+construction. Elle tomberait dès qu'une révision porterait sur un sous-ensemble de dates, ce qui est
+un cas de production banal. La règle C est correcte par construction, quelle que soit la couverture
+des versions.
+
+*Alternative écartée* : la règle A, maximum global. Elle confond « la dernière version qui existe »
+avec « la dernière version de ce site », et détruit 90 % du portefeuille.
+
+## Un artefact de flottants, à ne pas prendre pour un écart
+
+Les règles B et C retiennent les mêmes lignes, mais leurs totaux diffèrent de **7,15 × 10⁻⁷ MWh**,
+soit un écart relatif de **2,4 × 10⁻¹⁵**. Le signe lui-même varie d'une exécution à l'autre.
+
+Cause : **l'addition des flottants n'est pas associative**. Spark somme partition par partition, et le
+découpage diffère entre un regroupement par site et un regroupement par triplet, donc l'ordre des
+additions change et le dernier bit avec lui.
+
+C'est la raison concrète pour laquelle tout contrôle de total se pose comme une comparaison à une
+tolérance explicite, jamais comme une égalité. Voir `formalisation_controles.md`, section 15.
+
+## Points laissés ouverts
+
+**Le contenu des versions n'a pas été vérifié.** On sait que deux versions d'un même site couvrent le
+même calendrier, on n'a pas vérifié qu'elles portent des **valeurs différentes**. Si les révisions
+étaient des copies exactes, la sélection ne ferait que dédoublonner et les 19,7 % seraient de la pure
+duplication sans enjeu de contenu. Deux mesures restent à faire : les dates de production distinctes
+par version, dans la colonne `as_of_date` jamais exploitée, et le nombre de triplets site, date, heure
+portant plus d'une valeur de volume.
+
+**Le contrôle de section n'a pas été écrit**, faute de temps. Il devrait vérifier que la table filtrée
+par la règle retenue est injective sur le triplet site, date, indice horaire, et que les 500 sites
+sont conservés. À reprendre avant la clôture de la mission.
 
 ## 4. Détection d'unité sans la colonne d'unité
 
