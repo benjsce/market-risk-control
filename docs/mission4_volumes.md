@@ -99,7 +99,7 @@ Volumétrie mesurée à la lecture : **5 775 120 lignes**, **500 sites**, 12 par
 > mécanisme physique, puis dis-moi laquelle des deux colonnes horaires est fiable et laquelle est
 > ambiguë.
 
-## Prédiction
+### Prédiction
 
 Une journée civile ne dure pas 24 heures les jours de changement d'heure. En Europe, la transition a
 lieu le dernier dimanche de mars et le dernier dimanche d'octobre, soit en 2026 le **29 mars** et le
@@ -110,7 +110,7 @@ Prédiction faite avant toute mesure. Elle porte sur le calendrier réel, pas su
 données peut parfaitement stocker 24 heures ces deux jours-là et perdre une heure de livraison en
 silence. C'est le premier doute à lever.
 
-## Mesure
+### Mesure
 
 Comptage, pour chaque jour de livraison, des valeurs distinctes des **deux** colonnes horaires. Les
 compter séparément est ce qui répond aux deux moitiés de la question d'un seul coup.
@@ -133,7 +133,7 @@ Détail des jours anormaux :
 La table respecte donc la réalité physique : elle stocke bien 23 heures le 29 mars et 25 heures le
 25 octobre.
 
-## Mécanisme physique
+### Mécanisme physique
 
 Le passage à l'heure d'été supprime une heure locale, le passage à l'heure d'hiver en duplique une.
 Les deux transitions ne produisent pas le même défaut, et cette asymétrie est tout le sujet.
@@ -146,7 +146,7 @@ inoffensif pour une agrégation, il ne fait rien fusionner.
 une première fois en heure d'été à UTC+2, une seconde en heure d'hiver à UTC+1. Ce sont deux heures de
 livraison distinctes, séparées d'une heure réelle.
 
-## Colonne fiable et colonne ambiguë
+### Colonne fiable et colonne ambiguë
 
 `hour_index` est **fiable**. C'est un rang positionnel dans la journée de livraison, qui suit le nombre
 réel d'heures livrées : 23, 24 ou 25 selon le jour. Vérifié contigu à partir de 1 sur les 365 jours, et
@@ -163,7 +163,7 @@ Volume de l'ambiguïté : **une heure sur 8 760**, soit un jour de l'année et u
 est minuscule et ce n'est pas ce qui compte, car elle ne se manifeste pas comme une erreur mais comme
 une fusion silencieuse. C'est l'objet de la question 2.
 
-## Contrôle de la section
+### Contrôle de la section
 
 Trois invariants et deux valeurs de référence, tous vérifiés :
 
@@ -195,7 +195,7 @@ D'où le second contrôle, posé à la maille site, date, version.
 > Une somme naïve sur cette journée est-elle fausse ? Et un `GROUP BY delivery_hour_local` ? Les deux
 > réponses ne sont pas les mêmes, et c'est tout le sujet.
 
-## Périmètre de mesure
+### Périmètre de mesure
 
 Le 25 octobre, **version 1 uniquement**. La table porte trois versions de prévision, dont une seule
 couvre l'ensemble du portefeuille :
@@ -214,7 +214,7 @@ Le périmètre compte donc **12 500 lignes**, soit 500 sites multipliés par les
 compte confirme à la maille de la ligne ce que la question 1 avait établi à la maille des valeurs
 distinctes.
 
-## Prédiction
+### Prédiction
 
 **La somme naïve est juste.** Une somme parcourt les lignes et n'utilise aucune colonne comme clé. Les
 25 heures réellement livrées sont présentes en 25 lignes par site, toutes additionnées.
@@ -224,7 +224,7 @@ Elle rend 24 lignes au lieu de 25. Le total est identique, par l'invariance de l
 regroupement. Mais la ligne portant `2026-10-25 02:00` agrège deux heures de livraison distinctes,
 celles d'indices 3 et 4, et affiche donc environ le double de ses voisines.
 
-## Mesure
+### Mesure
 
 | Lecture | Lignes en sortie | Total MWh |
 |---|---|---|
@@ -250,7 +250,7 @@ La ligne collisionnée agrège **1 000 lignes d'origine**, soit les 500 sites mu
 heures réelles, pour un volume de **51 238,1 MWh**. Cette valeur est exactement la somme des indices 3
 et 4, et vaut **1,94 fois** la moyenne des heures voisines, les indices 2 et 5.
 
-## Somme naïve
+### Somme naïve
 
 **Juste.** Le total de 812 269,3 MWh est le vrai volume livré ce jour-là. Le fait que la journée
 compte 25 heures et non 24 ne dérange pas une somme : elle additionne ce qui existe, sans hypothèse
@@ -258,7 +258,7 @@ sur le nombre de termes.
 
 Un contrôle qui ne regarderait que ce total déclarerait la journée saine.
 
-## Agrégation par `delivery_hour_local`
+### Agrégation par `delivery_hour_local`
 
 **Total juste, décomposition fausse.** C'est le point de la question, et il est général : pour une
 grandeur extensive, la somme est **invariante** par tout regroupement, injectif ou non, puisque les
@@ -274,7 +274,7 @@ Concrètement, le profil horaire produit porte une pointe fictive de près du do
 heure a disparu. C'est ce profil, et non le total, que le desk utilise pour dimensionner sa
 couverture.
 
-## Ce que la différence enseigne
+### Ce que la différence enseigne
 
 Les deux défauts possibles d'une agrégation sont **symétriques**, et aucun contrôle unique ne les
 attrape tous les deux.
@@ -295,7 +295,7 @@ La règle générale, formalisée dans `formalisation_controles.md`, sections 7 
 par une colonne, vérifier qu'elle est injective à la maille visée ; avant de joindre, vérifier
 l'unicité de la clé des deux côtés.
 
-## Décision de traitement
+### Décision de traitement
 
 **Ne jamais agréger sur `delivery_hour_local`.** La clé horaire du portefeuille est le couple
 `delivery_date` et `hour_index`, injectif par site et par version, vérifié à la question 1.
@@ -308,7 +308,7 @@ injective. Écartée parce que l'information du décalage n'est pas dans la tabl
 reconstruite depuis `hour_index`, qui est déjà la clé cherchée. Reconstruire une clé fiable à partir
 d'une clé fiable pour réparer une clé ambiguë n'a pas d'intérêt.
 
-## Contrôle de la section
+### Contrôle de la section
 
 | Contrôle | Nature | Résultat |
 |---|---|---|
@@ -339,7 +339,7 @@ représentation près. Le contrôle compare leur écart absolu à une tolérance
 > sélection retiens-tu, et pourquoi le `MAX(version)` par site est un piège si tu ne réfléchis pas à
 > la granularité à laquelle tu l'appliques.
 
-## Couverture de chaque version
+### Couverture de chaque version
 
 Trois versions coexistent, et elles ne couvrent pas le même portefeuille :
 
@@ -363,7 +363,7 @@ trois. Mais ce compte ne dit pas lesquelles. La combinaison réellement détenue
 s'y replier, et aucun site n'existe sans elle. Les versions 2 et 3 sont des révisions partielles,
 portant sur des sous-ensembles disjoints à 16 sites près.
 
-## Complétude, par version
+### Complétude, par version
 
 L'année 2026 compte **8 760 heures** : 365 jours de 24 heures, les 23 heures du 29 mars et les 25 du
 25 octobre se compensant exactement.
@@ -380,7 +380,7 @@ Neuf couples site et version sont en deçà, tous à **8 040 heures**, soit un d
 Huit sites sont concernés, pour **6 480 heures absentes** de la table. Sept d'entre eux ne détiennent
 que la version 1. Le huitième, **S500318**, détient les versions 1 et 3, et les deux sont incomplètes.
 
-## Le piège du `MAX(version)` par site
+### Le piège du `MAX(version)` par site
 
 Le sujet annonce un piège de granularité. Il est réel, et il faut distinguer deux formes.
 
@@ -409,7 +409,7 @@ le trou relève de la question 6 et non de la sélection de version.
 la règle par site est sûre ici, et on sait pourquoi. Elle ne le serait pas sur un extrait où une
 révision partielle porterait sur un sous-ensemble de dates.
 
-## Comparaison des trois règles
+### Comparaison des trois règles
 
 Base du taux : la règle C, posée à la maille la plus fine, donc tenue pour correcte.
 
@@ -434,7 +434,7 @@ Un faux ami à signaler : la règle B retient 4 374 240 lignes, ce qui est aussi
 version 1 seule. Les populations sont différentes ; le nombre coïncide parce que dans les deux cas
 exactement huit calendriers de site sont amputés de 720 heures.
 
-## Règle retenue
+### Règle retenue
 
 **Règle C**, maximum de version à la maille site, date, indice horaire.
 
@@ -447,7 +447,7 @@ des versions.
 *Alternative écartée* : la règle A, maximum global. Elle confond « la dernière version qui existe »
 avec « la dernière version de ce site », et détruit 90 % du portefeuille.
 
-## Un artefact de flottants, à ne pas prendre pour un écart
+### Un artefact de flottants, à ne pas prendre pour un écart
 
 Les règles B et C retiennent les mêmes lignes, mais leurs totaux diffèrent de **7,15 × 10⁻⁷ MWh**,
 soit un écart relatif de **2,4 × 10⁻¹⁵**. Le signe lui-même varie d'une exécution à l'autre.
@@ -459,14 +459,39 @@ additions change et le dernier bit avec lui.
 C'est la raison concrète pour laquelle tout contrôle de total se pose comme une comparaison à une
 tolérance explicite, jamais comme une égalité. Voir `formalisation_controles.md`, section 15.
 
-## Points laissés ouverts
+### Points laissés ouverts
 
-**Le contenu des versions n'a pas été vérifié.** On sait que deux versions d'un même site couvrent le
-même calendrier, on n'a pas vérifié qu'elles portent des **valeurs différentes**. Si les révisions
-étaient des copies exactes, la sélection ne ferait que dédoublonner et les 19,7 % seraient de la pure
-duplication sans enjeu de contenu. Deux mesures restent à faire : les dates de production distinctes
-par version, dans la colonne `as_of_date` jamais exploitée, et le nombre de triplets site, date, heure
-portant plus d'une valeur de volume.
+**Le contenu des versions, point fermé.** Sur les 1 260 720 heures portant plus d'une version,
+**1 259 414 changent de valeur d'une version à l'autre, soit 99,90 %** :
+
+| Valeurs distinctes de volume sur le triplet | Triplets |
+|---|---|
+| 1 | 1 306 |
+| 2 | 1 119 645 |
+| 3 | 139 769 |
+| **total** | **1 260 720** |
+
+Le total retombe sur le nombre de triplets multi-versions, ce qui contrôle la mesure. Les révisions
+sont donc authentiques : la sélection de version ne se contente pas de dédoublonner, elle **décide
+quelle prévision fait foi**. Les 1 306 triplets à valeur unique, 0,10 %, sont des heures où la révision
+est tombée sur la même valeur, sans qu'on puisse distinguer la coïncidence numérique de la recopie.
+
+Le nombre de valeurs distinctes est borné par le nombre de versions présentes, d'où le domaine
+{1, 2, 3}. Les triplets à trois valeurs appartiennent aux 16 sites détenant les trois versions.
+
+**`as_of_date` est constante, donc muette.** Une seule date de production, 2026-07-24, identique pour
+les trois versions sur les 5 775 120 lignes. Elle ne date pas la production de chaque prévision mais
+l'extraction du fichier.
+
+Conséquence à retenir : **rien dans la table ne permet de vérifier qu'une version est postérieure à une
+autre.** On l'admet parce que le numéro est plus grand. Une table versionnée qui n'horodate pas ses
+versions ne permet à personne de contrôler l'ordre des révisions ; c'est une remarque de qualité de
+donnée à remonter au producteur.
+
+Cela laisse l'hypothèse des trois campagnes de production non tranchée. Elle reste cohérente avec les
+effectifs, les combinaisons {1}, {1,2}, {1,3} et {1,2,3} redonnant exactement 500, 110 et 50 sites par
+campagne. La règle C est insensible à cette question, puisqu'elle ne compare jamais que des versions
+d'une même cellule.
 
 **Le contrôle de section n'a pas été écrit**, faute de temps. Il devrait vérifier que la table filtrée
 par la règle retenue est injective sur le triplet site, date, indice horaire, et que les 500 sites
@@ -498,17 +523,152 @@ Sensibilité au seuil :
 > Un volume négatif est-il nécessairement une erreur dans un portefeuille B2B ? Réponds en
 > distinguant les cas, ne tranche pas d'un bloc.
 
-Recensement :
+### Périmètre
 
-> à remplir
+Toutes les mesures portent sur `volumes_retenus`, la table issue de la règle C de la question 3 :
+**4 374 240 lignes**, **500 sites**, **289 888 282,2 MWh**. Sur la table brute, les 144 sites
+multi-versions verraient leurs lignes négatives comptées deux ou trois fois.
 
-Cas retenus et critère de séparation :
+### Les trois cas légitimes, posés avant de mesurer
 
-> à remplir
+Un volume négatif n'est **pas nécessairement une erreur**. Trois situations le rendent physiquement
+légitime dans un portefeuille de clients professionnels.
 
-Décision de traitement par cas :
+**L'injection de production sur place.** Un site équipé de photovoltaïque ou de cogénération peut
+produire plus qu'il ne consomme et renvoyer le surplus sur le réseau. Le comptage le voit comme un
+soutirage négatif.
 
-> à remplir
+**Le déstockage.** Un site doté de stockage, batterie ou froid, restitue au réseau à certaines heures.
+
+**Une convention de comptage nette.** Certaines chaînes de mesure enregistrent soutirage et injection
+sur une même colonne signée plutôt que sur deux colonnes séparées.
+
+Chacune de ces trois situations laisse une **signature mesurable**, et c'est ce qui permet de les
+tester au lieu d'en débattre.
+
+### Recensement
+
+| Grandeur | Valeur |
+|---|---|
+| lignes de volume strictement négatif | **2 287** |
+| part des lignes de la table de travail | **0,052 %**, une ligne sur 1 913 |
+| sites concernés | **495 sur 500** |
+| volume négatif cumulé | **-149 265,1 MWh** |
+| part du volume du portefeuille | 0,051 % |
+
+Base des taux : la table de travail, 4 374 240 lignes et 289 888 282,2 MWh.
+
+Le premier chiffre remarquable est le nombre de sites : **99 % du portefeuille** porte au moins une
+heure négative, pour moins de cinq heures par site en moyenne. Ce n'est déjà pas le profil d'un
+injecteur, qui injecte régulièrement et sur des plages cohérentes.
+
+### Les deux populations, puis leur disparition
+
+La distribution des valeurs absolues fait d'abord croire à deux populations : médiane à 1,27 MWh,
+troisième quartile à 2,69, mais maximum à 11 644,3, soit 9 200 fois la médiane. La moyenne, 65,27, est
+tirée par cette queue et l'écart type vaut neuf fois la moyenne.
+
+La comparaison avec les lignes positives dissout cette lecture :
+
+| Statistique | Positifs, 4 371 953 lignes | Négatifs en valeur absolue, 2 287 lignes |
+|---|---|---|
+| minimum | 0,0365 | 0,0504 |
+| premier quartile | 0,6045 | 0,574 |
+| **médiane** | **1,2654** | **1,2653** |
+| troisième quartile | 2,531 | 2,6869 |
+| maximum | 14 524,3 | 11 644,3 |
+| moyenne | 66,34 | 65,27 |
+| écart type | 581,31 | 584,68 |
+
+**Les deux distributions sont la même.** Les médianes coïncident à la quatrième décimale. Il n'y a pas
+deux populations de négatifs, il y a un échantillon du portefeuille dont le signe a été retourné.
+
+Le classement des sites par médiane le confirme à la maille du site : les sites en tête des négatifs
+sont **les mêmes** que ceux en tête des positifs, dans presque le même ordre, S501142, S500688,
+S500766, S501186. Un négatif y vaut ce qu'un positif y vaut.
+
+*Erreur de lecture commise en chemin*, à noter parce qu'elle est instructive : la moyenne des négatifs,
+65,27 MWh, avait d'abord été rapprochée de la moyenne du portefeuille, 66,34 MWh, pour conclure à une
+inversion de signe. La conclusion était juste mais l'argument était faux, la moyenne étant ici dominée
+par la queue. Sur une distribution à écart type neuf fois supérieur à la moyenne, **c'est la médiane et
+les quartiles qui parlent**, pas la moyenne.
+
+### Le test d'indépendance
+
+Chacune des trois situations légitimes se réfute par un découpage, en comparant le taux de lignes
+négatives du groupe au point neutre de **0,0523 %**.
+
+| Découpage | Étendue du taux, pour 10 000 lignes | Ce que ça élimine |
+|---|---|---|
+| par `hour_index`, 25 groupes | 4,33 à 5,87 | l'injection photovoltaïque, qui culmine entre 8 et 18 heures et disparaît la nuit |
+| par `month`, 12 groupes | 4,70 à 5,54 | toute production sur place, qui a une saisonnalité |
+| par `commodity`, 2 groupes | GAS 5,16, POWER 5,27 | l'injection tout court : **le gaz ne peut pas être injecté** depuis un site de consommation raccordé à la distribution |
+
+Les trois taux collent au point neutre. Le signe négatif est **indépendant de l'heure, de la saison et
+de l'énergie**.
+
+Le croisement avec `commodity` est le plus fort des trois, parce qu'il est une **contradiction
+physique** et non une invraisemblance statistique : un point de livraison de gaz ne renvoie pas de
+méthane dans le réseau de distribution. Même raisonnement que celui appliqué à `dso` en Mission 0.
+
+### Verdict
+
+Une **inversion de signe tirée au hasard**, affectant une ligne sur 1 913, sans lien avec le site,
+l'heure, le mois ni l'énergie.
+
+Aucun phénomène physique ne produit un défaut réparti uniformément sur tout ce qui devrait le
+déterminer. C'est la signature d'un artefact de production de la donnée, exactement comme les attributs
+descriptifs de `ref_site` en Mission 0.
+
+### Impact
+
+Une inversion de signe déplace la valeur de **deux fois** le montant, la valeur vraie étant l'opposée
+de celle enregistrée.
+
+| Grandeur | Valeur |
+|---|---|
+| lignes touchées | 2 287 |
+| volume négatif enregistré | -149 265,1 MWh |
+| **sous-estimation du portefeuille** | **298 530,1 MWh** |
+| part du volume déclaré | **0,103 %** |
+
+L'impact en lignes, 0,052 %, et l'impact en volume, 0,103 %, diffèrent d'un facteur exactement 2. Ce
+n'est pas un hasard : les lignes fautives ayant la même distribution que les autres, leur poids en
+volume est proportionnel à leur poids en lignes, et le facteur 2 est celui du retournement de signe.
+
+### Décision de traitement
+
+**Marquer, ne pas corriger en silence.** Les 2 287 lignes sont signalées dans la liste d'anomalies avec
+leur impact, et le défaut est remonté à la source. Un moteur qui corrigerait sans le dire priverait le
+producteur de l'information qui lui permettrait de ne pas reproduire le défaut.
+
+**Publier les deux totaux**, déclaré et corrigé, plutôt qu'un seul. L'écart de 298 530,1 MWh est la
+mesure de l'anomalie ; le masquer par une correction silencieuse le fait disparaître du rapport.
+
+*Alternative écartée* : supprimer les lignes négatives. Elle sous-estimerait le portefeuille de
+149 265,1 MWh au lieu de le sous-estimer de 298 530,1, donc améliorerait le chiffre tout en détruisant
+de l'information. Une correction qui rapproche du bon résultat pour une mauvaise raison est pire qu'une
+anomalie signalée.
+
+*Alternative écartée* : corriger par valeur absolue dans la table de travail. Défendable pour un calcul
+de couverture, mais alors la table corrigée doit être **distincte** de la table brute et le marquage
+conservé, sinon la trace du défaut est perdue.
+
+### La réserve
+
+On a démontré que la **population** n'a aucune signature physique, pas que **chaque ligne** est fausse.
+Un injecteur réel noyé dans les 2 287 resterait indétectable par ces trois tests, qui portent tous sur
+des agrégats.
+
+C'est le raisonnement du plancher de la Mission 0 appliqué en sens inverse : là, les lignes non
+réfutées n'étaient pas validées ; ici, les lignes réfutées collectivement ne le sont pas
+individuellement.
+
+### Contrôle non fait
+
+Après la jointure avec `ref_site`, le compte de lignes n'a pas été vérifié. Les taux obtenus le
+suggèrent inchangé à 4 374 240, mais une jointure interne sur une clé non unique multiplierait les
+lignes sans rien signaler. À ajouter.
 
 ## 6. Les trous
 
